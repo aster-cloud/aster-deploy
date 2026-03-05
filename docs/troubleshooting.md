@@ -40,6 +40,21 @@ pnpm install
 
 ## 容器问题
 
+### 端口被占用（"address already in use"）
+
+Podman gvproxy 可能在旧容器删除后仍持有端口转发。解决方案：
+
+```bash
+# 方案 1: 使用其他端口
+LOCAL_PG_PORT=5433 task local:infra
+
+# 方案 2: 重启 Podman machine 释放端口
+podman machine stop && podman machine start
+task local:infra
+```
+
+在 `.env` 中设置 `LOCAL_PG_PORT=5433` 可永久避免冲突。注意同时更新 aster-api 的 `application.properties` 中的端口。
+
 ### Podman rootless 网络
 
 macOS 上 Podman 运行在 VM 中。容器间通信使用服务名（如 `postgres`），容器到主机使用 `host.containers.internal`。
