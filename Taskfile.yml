@@ -229,13 +229,13 @@ tasks:
       - uname -a
       - echo ""
       - echo "--- 工具版本 ---"
-      - java -version 2>&1 || echo "Java: 未安装"
-      - node --version 2>/dev/null || echo "Node: 未安装"
-      - pnpm --version 2>/dev/null || echo "pnpm: 未安装"
-      - podman --version 2>/dev/null || echo "Podman: 未安装"
-      - podman-compose version 2>/dev/null || echo "podman-compose: 未安装"
-      - kubectl version --client 2>/dev/null || echo "kubectl: 未安装"
-      - wrangler --version 2>/dev/null || echo "wrangler: 未安装"
+      - "java -version 2>&1 || echo 'Java: 未安装'"
+      - "node --version 2>/dev/null || echo 'Node: 未安装'"
+      - "pnpm --version 2>/dev/null || echo 'pnpm: 未安装'"
+      - "podman --version 2>/dev/null || echo 'Podman: 未安装'"
+      - "podman-compose version 2>/dev/null || echo 'podman-compose: 未安装'"
+      - "kubectl version --client 2>/dev/null || echo 'kubectl: 未安装'"
+      - "wrangler --version 2>/dev/null || echo 'wrangler: 未安装'"
       - echo ""
       - task: preflight
         vars: { MODE: release }
