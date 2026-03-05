@@ -1,0 +1,16 @@
+graph TD
+  core[aster-lang-core] --> lang_en[aster-lang-en]
+  core --> lang_zh[aster-lang-zh]
+  core --> lang_de[aster-lang-de]
+  core --> runtime[aster-lang-runtime]
+  lang_en --> truffle[aster-lang-truffle]
+  lang_zh --> truffle
+  lang_de --> truffle
+  runtime --> truffle
+  truffle --> api[aster-api]
+  api --> container_api[Podman: aster-api]
+  container_api --> k3s_api[K3S: aster-cloud ns]
+  ts[aster-lang-ts] --> cloud[aster-cloud]
+  cloud --> cf[Cloudflare Workers]
+  cloud --> lsp_container[Podman: aster-lsp]
+  lsp_container --> k3s_lsp[K3S: aster-lsp ns]

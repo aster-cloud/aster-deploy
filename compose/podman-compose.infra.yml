@@ -1,0 +1,34 @@
+# Aster 基础设施（仅 Postgres + Redis）
+# 用于 IDE 调试：启动基础设施后从 IntelliJ 运行 aster-api（Quarkus dev mode）
+# 用法: podman-compose -f compose/podman-compose.infra.yml up -d
+services:
+  postgres:
+    image: docker.io/bitnami/postgresql:latest
+    container_name: aster-postgres
+    ports:
+      - "${LOCAL_PG_PORT:-5432}:5432"
+    environment:
+      POSTGRESQL_USERNAME: postgres
+      POSTGRESQL_PASSWORD: postgres
+      POSTGRESQL_DATABASE: aster_policy
+    volumes:
+      - postgres-data:/bitnami/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: docker.io/redis:7-alpine
+    container_name: aster-redis
+    ports:
+      - "${LOCAL_REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres-data:

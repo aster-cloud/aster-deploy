@@ -1,0 +1,241 @@
+# Aster 生态统一编排
+# 安装 task: https://taskfile.dev/installation/
+# 用法: task <name>  例如 task local:infra, task dev, task release
+version: '3'
+
+dotenv: ['.env']
+
+vars:
+  COMPOSE_FILE: compose/podman-compose.yml
+  INFRA_COMPOSE_FILE: compose/podman-compose.infra.yml
+  RUNTIME:
+    sh: |
+      if command -v podman-compose >/dev/null 2>&1; then echo "podman-compose";
+      elif command -v docker-compose >/dev/null 2>&1; then echo "docker-compose";
+      elif command -v docker >/dev/null 2>&1; then echo "docker compose";
+      else echo "podman-compose"; fi
+
+tasks:
+  # ╔══════════════════════════════════════════╗
+  # ║              模式入口                     ║
+  # ╚══════════════════════════════════════════╝
+
+  local:
+    desc: 全栈本地环境（Podman Compose 容器化）
+    cmds:
+      - task: preflight
+        vars: { MODE: local }
+      - task: dev
+      - '{{.RUNTIME}} -f {{.COMPOSE_FILE}} --profile full up -d'
+      - task: verify:local
+
+  local:infra:
+    desc: 仅启动基础设施（Postgres + Redis），用于 IDE 调试
+    cmds:
+      - task: preflight
+        vars: { MODE: infra }
+      - '{{.RUNTIME}} -f {{.INFRA_COMPOSE_FILE}} up -d'
+      - echo ""
+      - echo "✓ 基础设施已启动（Postgres:5432, Redis:6379）"
+      - echo ""
+      - echo "下一步："
+      - echo "  1. IntelliJ → 运行 aster-api（Quarkus dev mode, 端口 8080）"
+      - echo "  2. 终端 → cd aster-cloud && pnpm run dev（端口 3000）"
+      - echo "  3. task verify:local — 检查服务状态"
+      - echo "  4. task local:stop — 停止基础设施"
+
+  local:stop:
+    desc: 停止所有本地容器
+    cmds:
+      - '{{.RUNTIME}} -f {{.COMPOSE_FILE}} --profile full down 2>/dev/null || true'
+      - '{{.RUNTIME}} -f {{.INFRA_COMPOSE_FILE}} down 2>/dev/null || true'
+
+  local:logs:
+    desc: 查看本地容器日志
+    cmds:
+      - '{{.RUNTIME}} -f {{.INFRA_COMPOSE_FILE}} logs -f 2>/dev/null || {{.RUNTIME}} -f {{.COMPOSE_FILE}} --profile full logs -f'
+
+  local:clean:
+    desc: 删除本地容器和数据卷
+    cmds:
+      - '{{.RUNTIME}} -f {{.COMPOSE_FILE}} --profile full down -v 2>/dev/null || true'
+      - '{{.RUNTIME}} -f {{.INFRA_COMPOSE_FILE}} down -v 2>/dev/null || true'
+
+  dev:
+    desc: 构建全部项目到本地（mavenLocal + pnpm）
+    cmds:
+      - task: preflight
+        vars: { MODE: dev }
+      - task: build:core
+      - task: build:after-core
+      - task: build:truffle
+      - task: build:api
+      - task: build:cloud
+
+  build:after-core:
+    desc: core 之后可并行的构建（packs + runtime + ts）
+    deps:
+      - build:packs
+      - build:runtime
+      - build:ts
+
+  release:
+    desc: 完整发布流水线（构建 → 发布 → 容器 → 部署 → 验证）
+    cmds:
+      - task: preflight
+        vars: { MODE: release }
+      - task: dev
+      - task: publish:jvm
+      - task: publish:npm
+      - task: container:api
+      - task: container:lsp
+      - task: deploy:api
+      - task: deploy:lsp
+      - task: deploy:cloud
+      - task: verify
+
+  # ╔══════════════════════════════════════════╗
+  # ║              构建任务                     ║
+  # ╚══════════════════════════════════════════╝
+
+  build:core:
+    desc: 构建 aster-lang-core
+    cmds:
+      - ./scripts/gradle-build.sh lang-core --publish-local
+
+  build:packs:
+    desc: 构建语言包（en/zh/de 并行）
+    deps:
+      - build:pack-en
+      - build:pack-zh
+      - build:pack-de
+
+  build:pack-en:
+    desc: 构建 aster-lang-en
+    cmds:
+      - ./scripts/gradle-build.sh lang-en --publish-local
+
+  build:pack-zh:
+    desc: 构建 aster-lang-zh
+    cmds:
+      - ./scripts/gradle-build.sh lang-zh --publish-local
+
+  build:pack-de:
+    desc: 构建 aster-lang-de
+    cmds:
+      - ./scripts/gradle-build.sh lang-de --publish-local
+
+  build:runtime:
+    desc: 构建 aster-lang-runtime
+    cmds:
+      - ./scripts/gradle-build.sh lang-runtime --publish-local
+
+  build:truffle:
+    desc: 构建 aster-lang-truffle
+    cmds:
+      - ./scripts/gradle-build.sh lang-truffle --publish-local
+
+  build:api:
+    desc: 构建 aster-api
+    cmds:
+      - ./scripts/gradle-build.sh api
+
+  build:ts:
+    desc: 构建 aster-lang-ts
+    cmds:
+      - ./scripts/pnpm-build.sh lang-ts
+
+  build:cloud:
+    desc: 构建 aster-cloud
+    cmds:
+      - ./scripts/pnpm-build.sh cloud
+
+  # ╔══════════════════════════════════════════╗
+  # ║            发布任务（release）             ║
+  # ╚══════════════════════════════════════════╝
+
+  publish:jvm:
+    desc: 发布 JVM 构件到 GitHub Packages
+    cmds:
+      - ./scripts/gradle-publish.sh lang-core lang-en lang-zh lang-de lang-runtime lang-truffle
+
+  publish:npm:
+    desc: 发布 aster-lang-ts 到 npm
+    cmds:
+      - ./scripts/pnpm-publish.sh lang-ts
+
+  # ╔══════════════════════════════════════════╗
+  # ║          容器镜像（release）               ║
+  # ╚══════════════════════════════════════════╝
+
+  container:api:
+    desc: 构建并推送 aster-api 容器镜像
+    cmds:
+      - ./scripts/container-build-push.sh api wontlost/aster-api {{.API_IMAGE_TAG | default "jvm-latest"}}
+
+  container:lsp:
+    desc: 构建并推送 aster-lsp 容器镜像
+    cmds:
+      - ./scripts/container-build-push.sh cloud wontlost/aster-lsp {{.LSP_IMAGE_TAG | default "0.0.9"}} --dockerfile Dockerfile.lsp
+
+  # ╔══════════════════════════════════════════╗
+  # ║            部署任务（release）             ║
+  # ╚══════════════════════════════════════════╝
+
+  deploy:api:
+    desc: 部署 aster-api 到 K3S
+    cmds:
+      - ./scripts/deploy-k3s.sh api
+
+  deploy:lsp:
+    desc: 部署 aster-lsp 到 K3S
+    cmds:
+      - ./scripts/deploy-k3s.sh lsp
+
+  deploy:cloud:
+    desc: 部署 aster-cloud 到 Cloudflare Workers
+    cmds:
+      - ./scripts/deploy-cloudflare.sh
+
+  # ╔══════════════════════════════════════════╗
+  # ║              验证任务                     ║
+  # ╚══════════════════════════════════════════╝
+
+  verify:
+    desc: 生产环境冒烟测试
+    cmds:
+      - ./scripts/verify.sh
+
+  verify:local:
+    desc: 本地环境冒烟测试
+    cmds:
+      - ./scripts/verify-local.sh
+
+  # ╔══════════════════════════════════════════╗
+  # ║              工具任务                     ║
+  # ╚══════════════════════════════════════════╝
+
+  preflight:
+    desc: 环境预检
+    cmds:
+      - ./scripts/preflight.sh {{.MODE | default "dev"}}
+
+  doctor:
+    desc: 详细环境诊断
+    cmds:
+      - echo "=== Aster Deploy 环境诊断 ==="
+      - echo ""
+      - echo "--- 系统信息 ---"
+      - uname -a
+      - echo ""
+      - echo "--- 工具版本 ---"
+      - java -version 2>&1 || echo "Java: 未安装"
+      - node --version 2>/dev/null || echo "Node: 未安装"
+      - pnpm --version 2>/dev/null || echo "pnpm: 未安装"
+      - podman --version 2>/dev/null || echo "Podman: 未安装"
+      - podman-compose version 2>/dev/null || echo "podman-compose: 未安装"
+      - kubectl version --client 2>/dev/null || echo "kubectl: 未安装"
+      - wrangler --version 2>/dev/null || echo "wrangler: 未安装"
+      - echo ""
+      - task: preflight
+        vars: { MODE: release }
