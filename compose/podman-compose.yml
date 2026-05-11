@@ -45,6 +45,10 @@ services:
       QUARKUS_DATASOURCE_PASSWORD: postgres
       QUARKUS_REDIS_HOSTS: redis://redis:6379
       QUARKUS_FLYWAY_MIGRATE_AT_START: "true"
+      ASTER_LLM_API_KEY: ${ASTER_LLM_API_KEY:-}
+      ASTER_LLM_BASE_URL: ${ASTER_LLM_BASE_URL:-https://api.openai.com}
+      ASTER_LLM_MODEL: ${ASTER_LLM_MODEL:-gpt-4o-mini}
+      ASTER_LLM_PROVIDER: ${ASTER_LLM_PROVIDER:-openai}
     depends_on:
       postgres:
         condition: service_healthy
@@ -70,6 +74,9 @@ services:
       - cloud-node-modules:/app/node_modules
     environment:
       NEXT_PUBLIC_API_URL: http://localhost:${LOCAL_API_PORT:-8080}
+      NEXT_PUBLIC_ASTER_POLICY_API_URL: http://localhost:${LOCAL_API_PORT:-8080}
+      NEXT_PUBLIC_ASTER_POLICY_WS_URL: ws://localhost:${LOCAL_API_PORT:-8080}/ws/preview
+      ASTER_POLICY_API_INTERNAL_URL: http://api:8080
     profiles: ["full"]
 
   lsp:

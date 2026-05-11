@@ -8,6 +8,7 @@ dotenv: ['.env']
 vars:
   COMPOSE_FILE: compose/podman-compose.yml
   INFRA_COMPOSE_FILE: compose/podman-compose.infra.yml
+  TEST_COMPOSE_FILE: compose/podman-compose.test.yml
   # 检测 Podman socket 路径（macOS 上 docker-compose 需要 DOCKER_HOST 指向 Podman）
   PODMAN_SOCKET:
     sh: |
@@ -61,9 +62,19 @@ tasks:
       - echo "  3. task verify:local — 检查服务状态"
       - echo "  4. task local:stop — 停止基础设施"
 
+  local:test:
+    desc: 全栈测试环境（安全禁用 + 测试用户）
+    cmds:
+      - task: preflight
+        vars: { MODE: local }
+      - task: dev
+      - '{{.RUNTIME}} -f {{.COMPOSE_FILE}} -f {{.TEST_COMPOSE_FILE}} --profile full up -d'
+      - task: verify:test
+
   local:stop:
     desc: 停止所有本地容器
     cmds:
+      - '{{.RUNTIME}} -f {{.COMPOSE_FILE}} -f {{.TEST_COMPOSE_FILE}} --profile full down 2>/dev/null || true'
       - '{{.RUNTIME}} -f {{.COMPOSE_FILE}} --profile full down 2>/dev/null || true'
       - '{{.RUNTIME}} -f {{.INFRA_COMPOSE_FILE}} down 2>/dev/null || true'
 
@@ -75,6 +86,7 @@ tasks:
   local:clean:
     desc: 删除本地容器和数据卷
     cmds:
+      - '{{.RUNTIME}} -f {{.COMPOSE_FILE}} -f {{.TEST_COMPOSE_FILE}} --profile full down -v 2>/dev/null || true'
       - '{{.RUNTIME}} -f {{.COMPOSE_FILE}} --profile full down -v 2>/dev/null || true'
       - '{{.RUNTIME}} -f {{.INFRA_COMPOSE_FILE}} down -v 2>/dev/null || true'
 
@@ -227,6 +239,11 @@ tasks:
     desc: 本地环境冒烟测试
     cmds:
       - ./scripts/verify-local.sh
+
+  verify:test:
+    desc: 全栈测试环境冒烟测试
+    cmds:
+      - ./scripts/verify-test.sh
 
   # ╔══════════════════════════════════════════╗
   # ║              工具任务                     ║

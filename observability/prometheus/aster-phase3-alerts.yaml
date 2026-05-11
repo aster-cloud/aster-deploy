@@ -1,0 +1,106 @@
+# Aster Lang 告警规则 — Phase 3E 增量
+# 补充 Sprint 3E 监控范围中的反指标，与 aster-alerts.yaml 并存。
+#
+# 部署方式：
+#   - K3S：再起一份 PrometheusRule CRD 命名 aster-phase3-rules（避免覆盖 aster-nsm-rules）
+#   - 单机：作为 rule_files 之一加载即可
+
+groups:
+  - name: aster.phase3.dunning-and-quota
+    interval: 1m
+    rules:
+      # Dunning：处于宽限期（grace）的付费用户数 — 高于阈值说明结算链路异常
+      - alert: AsterDunningGracePeriodHigh
+        expr: |
+          sum(aster_dunning_users{state="grace"}) > 20
+        for: 30m
+        labels:
+          severity: warning
+          team: billing
+        annotations:
+          summary: "宽限期用户数 > 20（持续 30 分钟）"
+          description: |
+            当前 grace 状态用户 {{ $value }}。
+            可能原因：Stripe webhook 中断 / 卡组到期未触达 / 模板邮件发送失败
+            参考：aster-cloud/src/lib/dunning.ts
+
+      # AI quota 接近耗尽（>= 80% 当月配额）的用户数
+      - alert: AsterAiQuotaNearExhaustion
+        expr: |
+          sum(aster_ai_quota_near_exhaustion_users) > 50
+        for: 1h
+        labels:
+          severity: info
+          team: product
+        annotations:
+          summary: "≥ 80% AI 配额耗尽的用户超过 50 人"
+          description: |
+            说明 AI 使用集中度上升，建议核对 Pro/Team 套餐配额是否合理。
+            参考：aster-cloud/src/lib/ai-quota.ts
+
+  - name: aster.phase3.audit-and-aha
+    interval: 1m
+    rules:
+      # 哈希链审计写入延迟 P99 > 500ms — 链路被阻塞，可能影响合规存证
+      - alert: AsterAuditWriteLatencyHigh
+        expr: |
+          histogram_quantile(0.99,
+            sum(rate(audit_log_write_duration_seconds_bucket[5m])) by (le)
+          ) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+          team: backend
+        annotations:
+          summary: "审计写入 P99 > 500ms（持续 10 分钟）"
+          description: |
+            当前 P99 = {{ $value | humanizeDuration }}
+            可能原因：Postgres 慢写 / Redis stream 拥塞（异步化路径）/ 哈希链锁竞争
+
+      # AHA 触达率（首次 publish → AHA 事件触发 7 日转化）跌破阈值
+      - alert: AsterAhaActivationRateLow
+        expr: |
+          (
+            sum(increase(aster_aha_users_activated_total[7d]))
+            / clamp_min(sum(increase(aster_aha_users_eligible_total[7d])), 1)
+          ) < 0.35
+        for: 6h
+        labels:
+          severity: warning
+          team: product
+        annotations:
+          summary: "AHA 7 日激活率 < 35%"
+          description: |
+            当前 {{ $value | humanizePercentage }}（PM 阈值 ≥ 35%）
+            排查：首版 onboarding 是否生效 / 模板覆盖率 / 引导路径埋点
+
+  - name: aster.phase3.billing-and-llm-safety
+    interval: 1m
+    rules:
+      # Stripe reconcile cron 报告差异 > 0 — 直接关注计费一致性
+      - alert: AsterStripeReconcileDriftDetected
+        expr: |
+          sum(increase(aster_stripe_reconcile_diff_total[1d])) > 0
+        for: 5m
+        labels:
+          severity: warning
+          team: billing
+        annotations:
+          summary: "Stripe 计费 reconcile 发现差异"
+          description: |
+            过去 24 小时累计 {{ $value }} 个团队的座位数与 Stripe 不一致。
+            参考：aster-cloud/src/lib/stripe-reconcile.ts，先确认 dry-run 日志，再决定是否人工介入。
+
+      # AI 全局熔断触发（content-safety / cost-circuit）
+      - alert: AsterAiGlobalCircuitOpen
+        expr: |
+          max_over_time(aster_ai_global_circuit_state[1m]) == 1
+        for: 1m
+        labels:
+          severity: critical
+          team: backend
+        annotations:
+          summary: "AI 全局熔断已触发"
+          description: |
+            可能由内容安全 / 成本上限 / 上游错误率触发。
+            排查顺序：aster-api 日志 → ContentSafetyService → LlmCircuitBreaker → 上游 provider 状态

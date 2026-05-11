@@ -66,6 +66,52 @@ task local:stop     # 停止容器
 task local:clean    # 删除容器和数据卷
 ```
 
+## Scheme B: API 无认证测试（IDE + curl）
+
+当使用 `task local:infra` + IDE Quarkus dev mode 时，可通过环境变量禁用安全控制，直接用 curl/Postman 测试 API。
+
+### 启动 Quarkus（安全禁用）
+
+```bash
+cd /path/to/aster-api
+ASTER_SECURITY_SIGNATURE_ENABLED=false \
+ASTER_SECURITY_RBAC_ENABLED=false \
+ASTER_RATELIMIT_ENABLED=false \
+ASTER_PII_ENFORCE=false \
+ASTER_TENANT_STRICT_FORMAT=false \
+./gradlew quarkusDev
+```
+
+### curl 测试示例
+
+```bash
+# 健康检查
+curl http://localhost:8080/q/health
+
+# 评估策略源码（无需认证）
+curl -X POST http://localhost:8080/api/v1/policies/evaluate-source \
+  -H "Content-Type: application/json" \
+  -H "X-Tenant-Id: test" \
+  -d '{"source": "Module Test."}'
+```
+
+## Scheme C: 全栈容器化测试
+
+使用 `task local:test` 启动全栈测试环境，自动禁用安全控制并创建测试用户。
+
+```bash
+# 启动（首次需要构建）
+task local:test
+
+# 验证
+task verify:test
+
+# 登录: http://localhost:3000/login
+# 邮箱: test@aster.dev  密码: test1234
+```
+
+详见 [README.md](../README.md) 中的命令参考。
+
 ## 常见问题
 
 ### Postgres 端口被占用

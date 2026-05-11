@@ -1,0 +1,24 @@
+apiVersion: 1
+datasources:
+  - name: Prometheus
+    type: prometheus
+    uid: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+
+  # WAADR 物化视图查询专用，连 aster-api 的 Postgres
+  - name: Postgres-Aster
+    type: postgres
+    uid: postgres
+    access: proxy
+    url: host.containers.internal:5432
+    user: postgres
+    secureJsonData:
+      password: postgres
+    jsonData:
+      database: aster_policy
+      sslmode: disable
+      postgresVersion: 1700
+    editable: false

@@ -1,0 +1,54 @@
+{
+  "_comment": "Phase 3E-3 PoC — 金融垂类 lexicon overlay。引用 zh-CN base lexicon，仅声明覆盖与新增。SPI v1.1 设计预演（v1.0 兼容：忽略 derivedFrom / industryVocabulary 字段）。",
+  "meta": {
+    "id": "zh-CN-finance",
+    "name": "简体中文（金融行业）",
+    "direction": "LTR",
+    "derivedFrom": "zh-CN",
+    "industry": "finance",
+    "auditTag": "industry:finance"
+  },
+  "keywords": {
+    "FUNC_TO": "金融规则",
+    "TYPE_DEF": "金融定义",
+    "WORKFLOW": "审批流",
+    "STEP": "审批环节"
+  },
+  "industryVocabulary": {
+    "RISK_SCORE": "风险评分",
+    "CREDIT_LINE": "授信额度",
+    "AML_FLAG": "反洗钱标记",
+    "KYC_LEVEL": "KYC 等级",
+    "BASEL_RATIO": "巴塞尔比率",
+    "LTV": "贷款价值比",
+    "DTI": "负债收入比",
+    "FICO_SCORE": "征信分数",
+    "COLLATERAL": "抵押物",
+    "GUARANTOR": "担保人",
+    "OVERDUE_DAYS": "逾期天数",
+    "DELINQUENCY": "违约情况",
+    "PROVISION": "拨备",
+    "NPL_RATIO": "不良率",
+    "REGULATORY_CAPITAL": "监管资本"
+  },
+  "punctuation": {
+    "statementEnd": "。",
+    "listSeparator": "，",
+    "enumSeparator": "，",
+    "blockStart": "：",
+    "stringQuoteOpen": "「",
+    "stringQuoteClose": "」"
+  },
+  "canonicalization": {
+    "fullWidthToHalf": true,
+    "whitespaceMode": "CJK",
+    "removeArticles": false,
+    "articles": [],
+    "allowedDuplicates": [],
+    "preTranslationTransformers": [],
+    "postTranslationTransformers": []
+  },
+  "messages": {
+    "industryUnknownVocab": "未识别的金融术语：{name}（请确认是否在金融词库 v{version} 范围内）"
+  }
+}

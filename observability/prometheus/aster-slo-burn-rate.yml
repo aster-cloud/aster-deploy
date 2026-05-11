@@ -1,0 +1,210 @@
+# SLO Multi-Window Burn Rate Alerts
+#
+# 基于 Google SRE Workbook 第 5 章 "Alerting on SLOs"：
+#   https://sre.google/workbook/alerting-on-slos/
+#
+# 思想：
+#   - 单窗口阈值告警（如"P99 > 200ms 持续 10min"）容易误报且滞后
+#   - Burn rate 告警同时看短窗口（fast burn，快速捕获突发）与长窗口（slow burn，过滤抖动）
+#   - 短窗口 + 长窗口都越界才告警，既减少误报又能在 SLO 真消耗时早发现
+#
+# 公式：
+#   error_budget = 1 - SLO_target
+#   burn_rate(window) = error_rate(window) / error_budget
+#   阈值组合（来自 SRE Workbook Table 5-1）：
+#     2% budget consumed in 1h    → 14.4× burn rate × 1h window  (Critical, Page)
+#     5% budget consumed in 6h    → 6×    burn rate × 6h window  (Critical, Page)
+#     10% budget consumed in 3d   → 1×    burn rate × 3d window  (Warning, Ticket)
+#
+# 告警动作分级：
+#   Page:    pager-duty critical（5 分钟内必须响应）
+#   Ticket:  Slack #pm-metrics warning（半天内处理）
+
+groups:
+  # ───────────────────────────────────────────────────────────
+  # SLO 1: 策略评估延迟（P99 ≤ 200ms 在 95% 时间内成立）
+  # ───────────────────────────────────────────────────────────
+  - name: aster.slo.evaluation-latency
+    interval: 30s
+    rules:
+      # Recording rule：每分钟算"高延迟比例"
+      # 高延迟 = 评估超过 200ms（与反指标阈值对齐）
+      - record: aster:evaluation_latency_high_ratio:rate5m
+        expr: |
+          (
+            sum(rate(policy_evaluation_duration_seconds_count[5m]))
+            -
+            sum(rate(policy_evaluation_duration_seconds_bucket{le="0.2"}[5m]))
+          )
+          /
+          clamp_min(sum(rate(policy_evaluation_duration_seconds_count[5m])), 0.001)
+
+      - record: aster:evaluation_latency_high_ratio:rate1h
+        expr: |
+          (
+            sum(rate(policy_evaluation_duration_seconds_count[1h]))
+            -
+            sum(rate(policy_evaluation_duration_seconds_bucket{le="0.2"}[1h]))
+          )
+          /
+          clamp_min(sum(rate(policy_evaluation_duration_seconds_count[1h])), 0.001)
+
+      - record: aster:evaluation_latency_high_ratio:rate6h
+        expr: |
+          (
+            sum(rate(policy_evaluation_duration_seconds_count[6h]))
+            -
+            sum(rate(policy_evaluation_duration_seconds_bucket{le="0.2"}[6h]))
+          )
+          /
+          clamp_min(sum(rate(policy_evaluation_duration_seconds_count[6h])), 0.001)
+
+      # SLO target = 95% 评估在 200ms 内 → error budget = 5% = 0.05
+      # Fast burn (Page)：14.4 × 0.05 = 0.72；同时 5min + 1h 都越界
+      - alert: AsterEvaluationLatencyBurnRateFast
+        expr: |
+          (
+            aster:evaluation_latency_high_ratio:rate5m > (14.4 * 0.05)
+            and
+            aster:evaluation_latency_high_ratio:rate1h > (14.4 * 0.05)
+          )
+        for: 2m
+        labels:
+          severity: critical
+          slo: evaluation-latency
+          burn_rate: fast
+          page: "true"
+        annotations:
+          summary: "评估延迟 SLO fast burn（2% 预算消耗 / 1h）"
+          description: |
+            5m 与 1h 窗口下，超过 200ms 的评估比例都 > 72%（14.4 倍 burn rate × 5% 错误预算）。
+            按当前燃烧率，5% 月度错误预算将在 1 小时内耗尽。立即响应。
+
+      # Slow burn (Ticket)：6 × 0.05 = 0.30；同时 1h + 6h 都越界
+      - alert: AsterEvaluationLatencyBurnRateSlow
+        expr: |
+          (
+            aster:evaluation_latency_high_ratio:rate1h > (6 * 0.05)
+            and
+            aster:evaluation_latency_high_ratio:rate6h > (6 * 0.05)
+          )
+        for: 15m
+        labels:
+          severity: warning
+          slo: evaluation-latency
+          burn_rate: slow
+        annotations:
+          summary: "评估延迟 SLO slow burn（5% 预算消耗 / 6h）"
+          description: |
+            1h 与 6h 窗口下，超过 200ms 的评估比例都 > 30%（6 倍 burn rate × 5% 错误预算）。
+            按当前燃烧率，5% 月度错误预算将在 6 小时内耗尽。
+
+  # ───────────────────────────────────────────────────────────
+  # SLO 2: 平台可用性（aster-api up ≥ 99.5%）
+  # ───────────────────────────────────────────────────────────
+  - name: aster.slo.platform-availability
+    interval: 30s
+    rules:
+      - record: aster:availability_error_ratio:rate5m
+        expr: 1 - avg_over_time(up{job="aster-api"}[5m])
+
+      - record: aster:availability_error_ratio:rate1h
+        expr: 1 - avg_over_time(up{job="aster-api"}[1h])
+
+      - record: aster:availability_error_ratio:rate6h
+        expr: 1 - avg_over_time(up{job="aster-api"}[6h])
+
+      # SLO target = 99.5% → error budget = 0.5% = 0.005
+      - alert: AsterApiAvailabilityBurnRateFast
+        expr: |
+          (
+            aster:availability_error_ratio:rate5m > (14.4 * 0.005)
+            and
+            aster:availability_error_ratio:rate1h > (14.4 * 0.005)
+          )
+        for: 2m
+        labels:
+          severity: critical
+          slo: platform-availability
+          burn_rate: fast
+          page: "true"
+        annotations:
+          summary: "aster-api 可用性 SLO fast burn"
+          description: |
+            5m 与 1h 窗口下，aster-api down 比例都 > 7.2%。
+            按当前燃烧率，0.5% 月度错误预算将在 1 小时内耗尽。
+
+      - alert: AsterApiAvailabilityBurnRateSlow
+        expr: |
+          (
+            aster:availability_error_ratio:rate1h > (6 * 0.005)
+            and
+            aster:availability_error_ratio:rate6h > (6 * 0.005)
+          )
+        for: 15m
+        labels:
+          severity: warning
+          slo: platform-availability
+          burn_rate: slow
+        annotations:
+          summary: "aster-api 可用性 SLO slow burn"
+          description: "1h 与 6h 窗口下，down 比例都 > 3%。"
+
+  # ───────────────────────────────────────────────────────────
+  # SLO 3: 规则回滚率（≤ 15% 在 7 天内）
+  # ───────────────────────────────────────────────────────────
+  # 注意：回滚是低频事件，用 ratio 直接计算（不依赖 rate window 外推）
+  - name: aster.slo.rollback-rate
+    interval: 1m
+    rules:
+      - record: aster:rollback_ratio:cumulative
+        expr: |
+          sum(rule_rolled_back_total)
+          /
+          clamp_min(sum(draft_published_total), 1)
+
+      # 7d 窗口的"近期"比率
+      - record: aster:rollback_ratio:rate1h
+        expr: |
+          sum(increase(rule_rolled_back_total[1h]))
+          /
+          clamp_min(sum(increase(draft_published_total[1h])), 1)
+
+      - record: aster:rollback_ratio:rate6h
+        expr: |
+          sum(increase(rule_rolled_back_total[6h]))
+          /
+          clamp_min(sum(increase(draft_published_total[6h])), 1)
+
+      # SLO 阈值 15%（PM 02-NSM 反指标 1）
+      # 不用 burn rate（回滚是离散事件），直接看 1h + 6h 双窗口越界
+      - alert: AsterRollbackRateHighFast
+        expr: |
+          (
+            aster:rollback_ratio:rate1h > 0.15
+            and
+            sum(increase(rule_rolled_back_total[1h])) >= 3
+          )
+        for: 5m
+        labels:
+          severity: critical
+          slo: rollback-rate
+          burn_rate: fast
+          page: "true"
+        annotations:
+          summary: "1 小时回滚率 > 15% 且回滚 ≥ 3 次"
+          description: |
+            短期回滚率失控：可能是新 AI 模型质量下降、审批流被绕过或业务边界突变。
+            立即响应：检查最近上线的策略与 AI 草稿采纳率。
+
+      - alert: AsterRollbackRateHighSlow
+        expr: |
+          aster:rollback_ratio:rate6h > 0.15
+        for: 30m
+        labels:
+          severity: warning
+          slo: rollback-rate
+          burn_rate: slow
+        annotations:
+          summary: "6 小时回滚率 > 15%"
+          description: "持续偏高的回滚率说明上线规则质量普遍下降。"

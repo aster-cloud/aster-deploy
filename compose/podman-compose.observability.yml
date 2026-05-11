@@ -1,0 +1,77 @@
+# 可观测性栈覆盖层
+# 用法：
+#   podman-compose -f podman-compose.yml -f podman-compose.test.yml \
+#                  -f podman-compose.observability.yml --profile full up -d
+#
+# 端口：
+#   Prometheus  :9090
+#   Grafana     :3030（避开 :3000 给 cloud）
+
+services:
+  prometheus:
+    image: docker.io/prom/prometheus:v2.55.1
+    container_name: aster-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/prometheus-rules:/etc/prometheus/rules:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=24h'
+      - '--web.enable-lifecycle'
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9090/-/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    profiles: ["full"]
+
+  grafana:
+    image: docker.io/grafana/grafana:11.3.1
+    container_name: aster-grafana
+    ports:
+      - "3030:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    volumes:
+      - ./observability/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      # 挂 dashboard provider 配置（不复用 dashboards/ 目录避免被当 dashboard 解析）
+      - ./observability/grafana/dashboards/dashboard.yml:/etc/grafana/provisioning/dashboards/dashboard.yml:ro
+      - grafana-data:/var/lib/grafana
+    healthcheck:
+      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://localhost:3000/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    profiles: ["full"]
+
+  mock-llm:
+    image: docker.io/python:3.12-alpine
+    container_name: aster-mock-llm
+    ports:
+      - "8400:8000"
+    volumes:
+      - ./observability/mock-llm:/app:ro
+    working_dir: /app
+    command: ["python3", "-u", "server.py"]
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--spider", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    profiles: ["full"]
+
+volumes:
+  prometheus-data:
+  grafana-data:

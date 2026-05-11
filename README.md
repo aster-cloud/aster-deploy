@@ -69,11 +69,33 @@ task local:stop
 task local:clean
 ```
 
+## 全栈测试环境
+
+安全控制禁用 + 测试用户（email+password 登录），适合 curl/Postman/浏览器端到端测试。
+
+```bash
+# 启动全栈测试环境
+task local:test
+
+# 验证环境就绪
+task verify:test
+
+# 测试凭据:
+#   邮箱: test@aster.dev
+#   密码: test1234
+#   登录: http://localhost:3000/login
+
+# API 无认证测试:
+#   curl http://localhost:8080/q/health
+#   curl -X POST -H 'Content-Type: application/json' -H 'X-Tenant-Id: test' -d '{"source":"Module Test."}' http://localhost:8080/api/v1/policies/evaluate-source
+```
+
 ## 命令参考
 
 | 命令 | 说明 |
 |------|------|
 | `task local` | 全栈容器化本地环境 |
+| `task local:test` | 全栈测试环境（安全禁用 + 测试用户） |
 | `task local:infra` | 仅基础设施（IDE 调试用） |
 | `task local:stop` | 停止本地容器 |
 | `task local:logs` | 查看容器日志 |
@@ -92,6 +114,7 @@ task local:clean
 | `task deploy:cloud` | 部署 Cloud 到 Cloudflare |
 | `task verify` | 生产冒烟测试 |
 | `task verify:local` | 本地冒烟测试 |
+| `task verify:test` | 全栈测试环境冒烟测试 |
 | `task preflight` | 环境预检 |
 | `task doctor` | 详细环境诊断 |
 
@@ -101,6 +124,7 @@ task local:clean
 |------|------|
 | 修改了 aster-lang-core 语法 | `task dev` |
 | 本地调试 aster-api | `task local:infra` + IntelliJ |
+| 全栈 E2E 测试（无认证） | `task local:test` |
 | 仅部署 API | `task build:api && task container:api && task deploy:api` |
 | 完整发布 | `task release` |
 
