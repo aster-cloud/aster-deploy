@@ -289,13 +289,17 @@ These match the 7 `@Disabled` policies in `DualEngineCrossLangTest` — direct e
 
 ### 9.3 Combined equivalence gap
 
+**初始基线（2026-05 P1-9 框架落地时）**：
+
 | Side | Files | Pass | Fail | Pass-rate |
 |---|---|---|---|---|
 | TS → Java | 360 | 285 | 75 | 79.2% |
 | Java → TS | 30 | 23 | 7 | 76.7% |
 | **Aggregate** | **390** | **308** | **82** | **79.0%** |
 
-Equivalence is currently **~79%**. Closing the remaining 21% requires grammar changes on **both** sides, sized below.
+**当前（2026-05-12 P1-10/-11 后）**：tier1+tier2 等价率 **92.9%**（见 §10.3 历史表）。
+剩余 14 个分歧主要是 lambda 短形 + match-bind 模式，Java grammar 后续补齐
+（追踪在 §9.4 backlog）。
 
 ### 9.4 Gap-closure backlog (sized)
 
@@ -383,8 +387,17 @@ corpus/
 | 维度 | 通过 / 总数 | 比率 |
 |---|---|---|
 | Tier 1 双向等价 | 162 / 162 | 100% |
-| Tier 2/3 — 单端可接受 | 35 | — |
-| **等价 corpus 范围（tier1+tier2）** | **162 / 197** | **82.2%** |
+| Tier 2/3 — 单端可接受 | 14 | — |
+| **等价 corpus 范围（tier1+tier2）** | **183 / 197** | **92.9%** |
+
+**变更历史**（来自 `aster-lang-test/equivalence-history.csv`）：
+| 日期 | 等价数 | 总数 | 等价率 | 触发 |
+|---|---|---|---|---|
+| 2026-05-12 (initial) | 162 | 197 | 82.2% | 框架建立（P1-9） |
+| 2026-05-12 (P1-11) | 169 | 197 | 85.8% | TS PEG 加 `and`/`or` binary ops |
+| 2026-05-12 (P1-10 step 1) | 177 | 197 | 89.9% | Java grammar 加 `:` 作 if 块分隔 |
+| 2026-05-12 (P1-10 step 2) | 183 | 197 | **92.9%** | Java 加 `at least`/`at most`/`is equal to`/`more than` 自然别名 |
+
 
 注：tier3 共 227 个 fixture 不参与等价度计算（它们是单端 fixture by design）。
 
