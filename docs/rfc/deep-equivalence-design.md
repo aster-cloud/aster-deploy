@@ -90,3 +90,17 @@ P1-9 是"框架建立"——把骨架立起来产出 baseline。P1-9.5 是"语�
 1. P1-9 nightly 报警出现 eval-time 分歧但 parse 等价（用户/dogfooding 发现）
 2. 进入 P2 PoC 阶段
 3. 准备外部审计（SOC2 或行业认证）
+
+## Real-world events triggering this design
+
+### 2026-05-13: user-function shadowing builtin（calculator bug）
+
+**症状**：用户在 dashboard 写 `Rule add given request: Let v be (request.leftAmount plus request.rightAmount). Return CalcResult with resultAmount set to v ...`，调用方 `calculate` 里 `Return add(request)` —— TS 引擎返回 `{resultAmount: 2000, ...}`，Java 引擎返回 `Integer(0)`。
+
+**根因**：aster-lang-truffle Loader.buildExpr 见到 `Call(Name("add"), [...])` 时检查 `Builtins.has("add") == true`（算术 `add(a,b)`），直接走 BuiltinCallNode；1 个 Map 参数 + 期待 2 个 Int → arity 失配在 DSL specialization 重写时被吞，静默返回 0。
+
+**修复**：aster-lang-truffle commit `51c0afe` — Loader 维护 `userFunctionNames` 集合，buildExpr 在分发 Call 时先查该集合，用户定义函数屏蔽同名 builtin。
+
+**parse-equivalence 没捕到**：两个引擎都能 parse 这段代码（rate 仍 92.9%）；分歧只在 eval。**正是本 RFC 预言的 case**。
+
+**启示**：这件事的发现需要用户实测；nightly 无法替代真实使用。但**有 `.cases.json` + eval-equivalence**就能 catch。把"实施 deep-equivalence"的优先级从 "P2 阶段做" 提到 "下个空闲 sprint 做"。
