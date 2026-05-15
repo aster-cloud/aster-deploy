@@ -176,3 +176,41 @@ Pro 月费 ¥299 ≈ $42，扣去 $1.20 LLM = **$40 毛利**，安全。
 
 **版本**：v1.0 · 2026-05-10
 **关联**：`05-pricing-packaging.md` / `02-north-star-metric.md` 反指标 4
+
+---
+
+## Known limitations & backlog
+
+### Team AI 归账走个人 user.id（R24-M2 / R25-M2 / R26-M1）
+
+**现状**：aster-cloud `/api/llm/complete` server-side proxy 把 `X-Tenant-Id` 设为
+`session.user.id`。NextAuth session callback（`src/auth.ts`）当前只 populate
+`id / plan / trialEndsAt`，没有 `activeTeamId` / `activeTenantId` 字段。
+
+**影响**：team 用户在 dashboard 里调 AI 完成时，调用被记到他个人 user.id 名下：
+- AI 计费 / quota 走个人配额，不消耗 team 的 plan 额度
+- audit log / Mixpanel 看不到 team 维度的 AI usage 归集
+
+**修复路径**（独立 PR，schema migration + UI 三步）：
+1. db schema 加 `users.activeTeamId text references Team(id)` 列（drizzle migration）
+2. dashboard `<TeamSwitcher>` 组件 UI：用户切换 team 时 PATCH `/api/me/active-team`，
+   server 更新 DB + session（NextAuth `update()` trigger）
+3. `/api/llm/complete` proxy 改成 `tenantId = session.user.activeTeamId ?? session.user.id`
+4. `auth.ts` jwt/session callback populate `activeTeamId`
+
+**为什么不在本 round 修**：(a) schema migration 是独立的 PR 单元；(b) UI 不是
+本轮 security audit scope；(c) 把 ghost field 显式标"undefined"已避免代码层
+风险，账目层差异在产品 ready 之前不阻塞。
+
+**跟踪**：建议建一个独立 GitHub issue/Linear ticket 引用此段。
+
+### AI SSE 端点 (/generate /explain /suggest) 还在浏览器直连模式（R24-M3）
+
+`/api/v1/ai/complete` 走 cloud-side proxy `/api/llm/complete`（R23 引入）。
+SSE 三端点尚未写 server-side proxy。当前生产部署需要：
+
+- 显式设 `aster.security.ai.sse.public=true`（R25 引入的细粒度旁路），仅放过
+  SSE 三段，`/complete` 仍要求 HMAC。
+- 或写 Next.js Edge streaming proxy，转发 chunked SSE 帧（更安全但工作量大）。
+
+跟踪同上 issue。
