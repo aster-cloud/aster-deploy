@@ -97,6 +97,11 @@ describe('signing flow', () => {
       licenseId: 'lic_123',
       customer: 'Acme Corp',
       tier: 'enterprise',
+      // v3 起 deploymentBinding 必填，sign.ts 在 approve / sign 入口都会校验
+      deploymentBinding: {
+        deploymentId: 'a'.repeat(64),
+        deploymentLabel: 'acme-test',
+      },
     };
     const approve = await subject.app.request('/v1/approve', {
       method: 'POST',
@@ -139,7 +144,14 @@ describe('signing flow', () => {
 
   it('blocks replay of the same approval token', async () => {
     const { app: hono } = app();
-    const payload = { schemaVersion: 2, licenseId: 'lic_123' };
+    const payload = {
+      schemaVersion: 2,
+      licenseId: 'lic_123',
+      deploymentBinding: {
+        deploymentId: 'a'.repeat(64),
+        deploymentLabel: 'replay-test',
+      },
+    };
     const approve = await hono.request('/v1/approve', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-operator-jwt': 'operator' },
@@ -206,5 +218,55 @@ describe('signing flow', () => {
     expect(sign.status).toBe(502);
     const audit = await readFile(auditPath, 'utf8');
     expect(audit).toContain('vault-5xx');
+  });
+
+  it('rejects license payload without deploymentBinding at approve time', async () => {
+    const subject = app();
+    const res = await subject.app.request('/v1/approve', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-operator-jwt': 'operator' },
+      body: JSON.stringify({
+        purpose: 'license',
+        keyId: 'license-signing-v2-2026-01',
+        // no deploymentBinding → must 400
+        payload: { schemaVersion: 2, licenseId: 'lic_no_binding', customer: 'X' },
+      }),
+    });
+    expect(res.status).toBe(400);
+    // 应有 audit 记录拒绝原因（生产 onError 把对外 error 统一打成 request-failed
+    // 防泄漏 internal 细节，但 audit log 保留真实 reason）。
+    const audit = await readFile(auditPath, 'utf8');
+    expect(audit).toContain('binding-required');
+  });
+
+  it('rejects license payload with malformed deploymentBinding', async () => {
+    const subject = app();
+    const res = await subject.app.request('/v1/approve', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-operator-jwt': 'operator' },
+      body: JSON.stringify({
+        purpose: 'license',
+        keyId: 'license-signing-v2-2026-01',
+        payload: {
+          schemaVersion: 2,
+          deploymentBinding: { deploymentId: 'not-hex', deploymentLabel: 'X' },
+        },
+      }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('allows revocation purpose without deploymentBinding (binding is license-only)', async () => {
+    const subject = app();
+    const res = await subject.app.request('/v1/approve', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-operator-jwt': 'operator' },
+      body: JSON.stringify({
+        purpose: 'revocation',
+        keyId: 'revocation-signing-v2-2026-01',
+        payload: { schemaVersion: 1, version: 1, revoked: [] },
+      }),
+    });
+    expect(res.status).toBe(200);
   });
 });

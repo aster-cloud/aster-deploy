@@ -51,8 +51,17 @@ usage() {
     --term annual|five-year|perpetual \
     --features sso,audit-export,... \
     --sku standard|air-gapped \
+    --deployment-slug <slug> \
+    --deployment-label "Acme Prod US-East" \
+    [--deployment-url https://acme-prod.example.com] \
     [--key-id <signing-key-id>] \
     [--dry-run]
+
+deployment binding:
+  --deployment-slug    必填；与 customer 拼接后 SHA-256 得到 deploymentId
+                       slug 是客户运营商内部短代号（"acme-prod" / "globex-staging"）
+  --deployment-label   必填；admin UI 显示，让 ops 一眼看出 license 绑定到哪里
+  --deployment-url     可选；forensics 用，不参与签名比对
 
 审批签发:
   VAULT_TOKEN_OPERATOR=... VAULT_TOKEN_WITNESS=... \
@@ -75,19 +84,26 @@ require_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "缺少命令: $1"
 }
 
+DEPLOYMENT_SLUG=""
+DEPLOYMENT_LABEL=""
+DEPLOYMENT_URL=""
+
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --customer)   CUSTOMER="${2:-}"; shift 2 ;;
-    --tier)       TIER="${2:-}"; shift 2 ;;
-    --seats)      SEATS="${2:-}"; shift 2 ;;
-    --term)       TERM="${2:-}"; shift 2 ;;
-    --features)   FEATURES="${2:-}"; shift 2 ;;
-    --sku)        SKU="${2:-}"; shift 2 ;;
-    --key-id)     KEY_ID="${2:-}"; shift 2 ;;
-    --approve)    APPROVE_TOKEN="${2:-}"; shift 2 ;;
-    --dry-run)    DRY_RUN=1; shift ;;
-    -h|--help)    usage; exit 0 ;;
-    *)            die "未知参数: $1" ;;
+    --customer)            CUSTOMER="${2:-}"; shift 2 ;;
+    --tier)                TIER="${2:-}"; shift 2 ;;
+    --seats)               SEATS="${2:-}"; shift 2 ;;
+    --term)                TERM="${2:-}"; shift 2 ;;
+    --features)            FEATURES="${2:-}"; shift 2 ;;
+    --sku)                 SKU="${2:-}"; shift 2 ;;
+    --deployment-slug)     DEPLOYMENT_SLUG="${2:-}"; shift 2 ;;
+    --deployment-label)    DEPLOYMENT_LABEL="${2:-}"; shift 2 ;;
+    --deployment-url)      DEPLOYMENT_URL="${2:-}"; shift 2 ;;
+    --key-id)              KEY_ID="${2:-}"; shift 2 ;;
+    --approve)             APPROVE_TOKEN="${2:-}"; shift 2 ;;
+    --dry-run)             DRY_RUN=1; shift ;;
+    -h|--help)             usage; exit 0 ;;
+    *)                     die "未知参数: $1" ;;
   esac
 done
 
@@ -242,6 +258,26 @@ validate_issue_args() {
       feature_allowed "$feature" || die "未知 feature: ${feature}"
     done
   fi
+
+  # deployment binding（v3 必填）
+  [ -n "$DEPLOYMENT_SLUG" ] \
+    || die "--deployment-slug 不能为空（v3 起所有 license 必须绑定部署）"
+  [[ "$DEPLOYMENT_SLUG" =~ ^[a-z0-9][a-z0-9_-]{1,63}$ ]] \
+    || die "--deployment-slug 必须是 ^[a-z0-9][a-z0-9_-]{1,63}$"
+  [ -n "$DEPLOYMENT_LABEL" ] \
+    || die "--deployment-label 不能为空"
+  if [ -n "$DEPLOYMENT_URL" ]; then
+    [[ "$DEPLOYMENT_URL" =~ ^https?:// ]] \
+      || die "--deployment-url 必须是 http(s):// 开头"
+  fi
+}
+
+# deploymentId = sha256(<customer>|<slug>)。客户拿到这串 hex 配进
+# on-prem 部署的 ASTER_DEPLOYMENT_ID 环境变量；verify 链路严格 hex 字面比对。
+# 拼接顺序与 separator 是契约的一部分，aster-cloud 不需要重算（只读 hash），
+# 但 license-signing-api 集成测试与本脚本必须用同一公式。
+compute_deployment_id() {
+  printf '%s|%s' "$CUSTOMER" "$DEPLOYMENT_SLUG" | sha256_hex
 }
 
 features_json() {
@@ -265,6 +301,21 @@ features_json() {
 # 这里仍使用 -cnS 是为了让 audit trail 内的 payload 可被外部工具稳定对比。
 build_payload() {
   local license_id="$1" key_id="$2" issued_at="$3" expires_at="$4" not_before="$5" feature_array="$6"
+  local deployment_id deployment_binding
+  deployment_id="$(compute_deployment_id)"
+  # 用 jq 构造 binding 对象，让 deploymentUrl 仅在非空时出现（保持 payload canonical）。
+  if [ -n "$DEPLOYMENT_URL" ]; then
+    deployment_binding="$(jq -cnS \
+      --arg deploymentId "$deployment_id" \
+      --arg deploymentLabel "$DEPLOYMENT_LABEL" \
+      --arg deploymentUrl "$DEPLOYMENT_URL" \
+      '{deploymentId: $deploymentId, deploymentLabel: $deploymentLabel, deploymentUrl: $deploymentUrl}')"
+  else
+    deployment_binding="$(jq -cnS \
+      --arg deploymentId "$deployment_id" \
+      --arg deploymentLabel "$DEPLOYMENT_LABEL" \
+      '{deploymentId: $deploymentId, deploymentLabel: $deploymentLabel}')"
+  fi
 
   if [ "$SKU" = "standard" ]; then
     jq -cnS \
@@ -280,6 +331,7 @@ build_payload() {
       --argjson features "$feature_array" \
       --arg sku "$SKU" \
       --arg licenseTerm "$TERM" \
+      --argjson deploymentBinding "$deployment_binding" \
       --arg revocationCheckUrl "$REVOCATION_CHECK_URL" \
       '{
         schemaVersion: $schemaVersion,
@@ -294,7 +346,7 @@ build_payload() {
         features: $features,
         sku: $sku,
         licenseTerm: $licenseTerm,
-        deploymentBinding: null,
+        deploymentBinding: $deploymentBinding,
         revocationCheckUrl: $revocationCheckUrl
       }'
   else
@@ -311,6 +363,7 @@ build_payload() {
       --argjson features "$feature_array" \
       --arg sku "$SKU" \
       --arg licenseTerm "$TERM" \
+      --argjson deploymentBinding "$deployment_binding" \
       '{
         schemaVersion: $schemaVersion,
         licenseId: $licenseId,
@@ -324,7 +377,7 @@ build_payload() {
         features: $features,
         sku: $sku,
         licenseTerm: $licenseTerm,
-        deploymentBinding: null
+        deploymentBinding: $deploymentBinding
       }'
   fi
 }
@@ -521,9 +574,18 @@ if [ -n "$APPROVE_TOKEN" ]; then
   send_slack_audit "$payload" "$operator" "$witness" "$license_id" "$current_fingerprint"
   delete_pending_approval "$APPROVE_TOKEN"
 
+  # 从 payload 里提 deployment 信息再次打印，方便 ops 把 deploymentId 同步给客户。
+  # 客户必须配 ASTER_DEPLOYMENT_ID=<这个 hex> 才能让 on-prem verify 通过。
+  bound_deployment_id="$(printf '%s' "$payload" | jq -r '.deploymentBinding.deploymentId')"
+  bound_deployment_label="$(printf '%s' "$payload" | jq -r '.deploymentBinding.deploymentLabel')"
+
   echo ""
   echo "=== License Key（只显示一次，请用加密渠道转交客户）==="
   printf '%s\n' "$license_key"
+  echo ""
+  echo "=== Deployment Binding（必须由客户配进 on-prem 环境）==="
+  echo "deploymentLabel : ${bound_deployment_label}"
+  echo "ASTER_DEPLOYMENT_ID=${bound_deployment_id}"
   echo ""
   echo "audit 仅保留 sha256: ${license_key_sha256}"
   log_success "签发完成: ${license_id}"

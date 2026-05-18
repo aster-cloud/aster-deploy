@@ -18,6 +18,35 @@ const SignBodySchema = ApproveBodySchema.extend({
   approvalToken: z.string().regex(/^[0-9a-f]{64}$/),
 });
 
+// Shape of deploymentBinding for license payloads (required since v3).
+// We don't validate the full LicensePayloadV2 here — that's aster-cloud's job
+// at verify time — but binding is non-negotiable: a license without binding
+// is a regression to the v1/v2 "one key, N deployments" attack model.
+const DeploymentBindingSchema = z.object({
+  deploymentId: z.string().regex(/^[0-9a-f]{64}$/, 'deploymentId must be 64-hex sha256'),
+  deploymentLabel: z.string().min(1).max(256),
+  deploymentUrl: z.string().url().optional(),
+});
+
+/**
+ * Reject sign requests for `purpose='license'` whose payload lacks a valid
+ * deploymentBinding. License signing is the only path that mutates trust
+ * surface for on-prem; revocation payloads have a different schema (no
+ * binding) and are not affected.
+ */
+function assertLicenseBinding(purpose: 'license' | 'revocation', payload: unknown): void {
+  if (purpose !== 'license') return;
+  const binding = (payload as Record<string, unknown> | null)?.deploymentBinding;
+  const parsed = DeploymentBindingSchema.safeParse(binding);
+  if (!parsed.success) {
+    throw new AppError(
+      400,
+      'binding-required',
+      'license payload must include deploymentBinding { deploymentId, deploymentLabel, deploymentUrl? }',
+    );
+  }
+}
+
 function constantTimeEqual(a: string, b: string): boolean {
   const left = Buffer.from(a);
   const right = Buffer.from(b);
@@ -55,6 +84,7 @@ export function createSignRoutes(deps: AppDeps): Hono<{ Variables: AppVariables 
 
     const body = ApproveBodySchema.parse(await c.req.json());
     validateKeyId(deps, body.purpose, body.keyId);
+    assertLicenseBinding(body.purpose, body.payload);
 
     const canonicalPayload = canonicalStringify(body.payload);
     const payloadSha256 = sha256Hex(canonicalPayload);
@@ -117,6 +147,7 @@ export function createSignRoutes(deps: AppDeps): Hono<{ Variables: AppVariables 
 
     const body = SignBodySchema.parse(await c.req.json());
     validateKeyId(deps, body.purpose, body.keyId);
+    assertLicenseBinding(body.purpose, body.payload);
 
     if (deps.replay.has(witness.sub, body.approvalToken)) {
       await deps.audit.append({
