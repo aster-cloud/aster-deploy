@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: license-signing-api
+  namespace: aster-license-signing
+  labels:
+    app.kubernetes.io/name: license-signing-api
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: license-signing-api
+  ports:
+    - name: http
+      port: 8443
+      targetPort: http

@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "aster-license-signing-api.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+data:
+  # 非敏感运行配置；Vault token 由 Vault Agent 注入文件
+  PORT: "{{ .Values.service.port }}"
+  VAULT_ADDR: {{ .Values.config.vaultAddr | quote }}
+  VAULT_TOKEN_FILE: {{ .Values.config.vaultTokenFile | quote }}
+  JWT_ISSUER: {{ .Values.config.jwtIssuer | quote }}
+  JWT_AUDIENCE: {{ .Values.config.jwtAudience | quote }}
+  JWT_JWKS_URL: {{ .Values.config.jwtJwksUrl | quote }}
+  ALLOWED_KEY_IDS: {{ .Values.config.allowedKeyIds | quote }}
+  AUDIT_LOG_PATH: {{ .Values.config.auditLogPath | quote }}
+  LOG_LEVEL: {{ .Values.config.logLevel | quote }}

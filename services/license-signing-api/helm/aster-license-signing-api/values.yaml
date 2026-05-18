@@ -1,0 +1,82 @@
+# 副本数；生产建议至少 2 个副本
+replicaCount: 2
+
+image:
+  # 容器镜像仓库
+  repository: docker.io/wontlost/aster-license-signing-api
+  # CI 通常用 git sha 覆盖
+  tag: latest
+  # K3S 节点已有镜像时不强制拉取
+  pullPolicy: IfNotPresent
+
+service:
+  # HTTP 端口；mTLS 在 sidecar / ingress 层终止
+  port: 8443
+
+config:
+  # Vault API 地址
+  vaultAddr: https://vault.vault.svc.cluster.local:8200
+  # Vault Agent Injector 写入的 token 文件
+  vaultTokenFile: /vault/secrets/vault-token
+  # OIDC issuer
+  jwtIssuer: https://idp.aster.com
+  # OIDC audience
+  jwtAudience: aster-license-signing-api
+  # JWKS URL
+  jwtJwksUrl: https://idp.aster.com/.well-known/jwks.json
+  # 允许签名的 keyId 正则
+  allowedKeyIds: ^(license|revocation)-signing-v2-[0-9]{4}-[0-9]{2}$
+  # 审计 JSONL 路径
+  auditLogPath: /var/log/license-signing-api/audit.jsonl
+  # pino 日志级别
+  logLevel: info
+
+secrets:
+  # 可选 Slack webhook；生产通过外部 secret 注入，不要提交明文
+  licensesSlackWebhook: ""
+
+vault:
+  # Vault Kubernetes auth role
+  role: aster-license-signing-api
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+audit:
+  # 审计 PVC 大小
+  storage: 1Gi
+
+ingress:
+  # 是否创建 ingress
+  enabled: true
+  # ingressClassName；Cloudflare Tunnel / Traefik 按集群实际配置
+  className: traefik
+  # cert-manager ClusterIssuer
+  clusterIssuer: letsencrypt-prod
+  # 内部签发 API host
+  host: license-signing.aster-lang.internal
+
+networkPolicy:
+  # 是否启用 NetworkPolicy
+  enabled: true
+  # 可访问 signing API 的 admin workload namespace
+  adminNamespace: aster-cloud
+  # Prometheus scraper namespace
+  prometheusNamespace: monitoring
+  # Vault namespace
+  vaultNamespace: vault
+  # Vault service port
+  vaultPort: 8200
+  # JWKS / Slack 外联应通过 egress gateway；原生 NetworkPolicy 不支持 FQDN
+  egressNamespace: cloudflare-tunnel
+
+serviceMonitor:
+  # 是否创建 Prometheus Operator ServiceMonitor
+  enabled: true
+  # Prometheus Operator 常用 release label
+  releaseLabel: kube-prometheus-stack

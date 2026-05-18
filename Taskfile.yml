@@ -254,6 +254,26 @@ tasks:
     cmds:
       - ./scripts/preflight.sh {{.MODE | default "dev"}}
 
+  signing-api:dev:
+    desc: 启动 license signing API 本地开发服务
+    cmds:
+      - cd services/license-signing-api && pnpm dev
+
+  signing-api:test:
+    desc: 运行 license signing API 测试
+    cmds:
+      - cd services/license-signing-api && pnpm test
+
+  signing-api:build:
+    desc: 构建 license signing API
+    cmds:
+      - cd services/license-signing-api && pnpm build
+
+  signing-api:image:
+    desc: 构建 license signing API 容器镜像
+    cmds:
+      - cd services/license-signing-api && docker build -t aster-license-signing-api:dev .
+
   doctor:
     desc: 详细环境诊断
     cmds:

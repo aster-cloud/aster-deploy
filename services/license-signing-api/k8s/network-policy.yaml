@@ -1,0 +1,51 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: license-signing-api
+  namespace: aster-license-signing
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: license-signing-api
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # 只允许 aster-cloud admin pods 和 Prometheus 访问；具体 podSelector 按集群标签收紧
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: aster-cloud
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: 8443
+  egress:
+    # DNS
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # Vault in-cluster service
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: vault
+      ports:
+        - protocol: TCP
+          port: 8200
+    # JWKS / Slack 外联建议经 egress gateway 或 Cloudflare Tunnel；原生 NetworkPolicy 不支持 FQDN
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: cloudflare-tunnel
+      ports:
+        - protocol: TCP
+          port: 443

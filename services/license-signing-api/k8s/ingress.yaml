@@ -1,0 +1,25 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: license-signing-api
+  namespace: aster-license-signing
+  annotations:
+    # cert-manager 负责 TLS；实际 issuer 按集群替换
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - license-signing.aster-lang.internal
+      secretName: license-signing-api-tls
+  rules:
+    - host: license-signing.aster-lang.internal
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: license-signing-api
+                port:
+                  name: http

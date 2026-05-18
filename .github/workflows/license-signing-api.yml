@@ -1,0 +1,82 @@
+name: license-signing-api
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - services/license-signing-api/**
+      - .github/workflows/license-signing-api.yml
+  pull_request:
+    paths:
+      - services/license-signing-api/**
+      - .github/workflows/license-signing-api.yml
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-test:
+    name: build and test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/license-signing-api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.31.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: services/license-signing-api/package.json
+      - run: pnpm install --no-frozen-lockfile
+      - run: pnpm test
+      - run: pnpm build
+
+  image:
+    name: build and push image
+    needs: build-test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: services/license-signing-api
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            docker.io/wontlost/aster-license-signing-api:${{ github.sha }}
+            docker.io/wontlost/aster-license-signing-api:latest
+
+  deploy:
+    name: argocd sync
+    needs: image
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    steps:
+      - name: Trigger ArgoCD sync when credentials are configured
+        env:
+          ARGOCD_SERVER: ${{ secrets.ARGOCD_SERVER }}
+          ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_AUTH_TOKEN }}
+          ARGOCD_APP: ${{ secrets.ARGOCD_LICENSE_SIGNING_APP }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ARGOCD_SERVER:-}" ] || [ -z "${ARGOCD_AUTH_TOKEN:-}" ] || [ -z "${ARGOCD_APP:-}" ]; then
+            echo "ArgoCD secrets not configured; image pushed and GitOps controller will detect manifests."
+            exit 0
+          fi
+          curl -fsS -X POST "https://${ARGOCD_SERVER}/api/v1/applications/${ARGOCD_APP}/sync" \
+            -H "Authorization: Bearer ${ARGOCD_AUTH_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d '{"prune":false,"dryRun":false}'

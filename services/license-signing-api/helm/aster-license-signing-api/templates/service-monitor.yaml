@@ -1,0 +1,18 @@
+{{- if .Values.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "aster-license-signing-api.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    release: {{ .Values.serviceMonitor.releaseLabel | quote }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "aster-license-signing-api.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+{{- end }}

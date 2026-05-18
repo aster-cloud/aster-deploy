@@ -1,0 +1,95 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: license-signing-api
+  namespace: aster-license-signing
+  labels:
+    app.kubernetes.io/name: license-signing-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: license-signing-api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: license-signing-api
+      annotations:
+        vault.hashicorp.com/agent-inject: "true"
+        vault.hashicorp.com/role: "aster-license-signing-api"
+        vault.hashicorp.com/agent-inject-secret-vault-token: "auth/token/lookup-self"
+        vault.hashicorp.com/agent-inject-template-vault-token: |
+          {{- with secret "auth/token/lookup-self" -}}
+          {{ .Data.id }}
+          {{- end -}}
+    spec:
+      serviceAccountName: license-signing-api
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: api
+          # 默认 :latest；生产部署用 kustomize images 或 ArgoCD Image Updater 替换为 sha tag
+          image: docker.io/wontlost/aster-license-signing-api:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8443
+          envFrom:
+            - configMapRef:
+                name: license-signing-api-config
+            - secretRef:
+                name: license-signing-api-secrets
+                optional: true
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - sh
+                  - -c
+                  - sleep 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          volumeMounts:
+            - name: audit
+              mountPath: /var/log/license-signing-api
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: audit
+          persistentVolumeClaim:
+            claimName: license-signing-api-audit
+        - name: tmp
+          emptyDir: {}
