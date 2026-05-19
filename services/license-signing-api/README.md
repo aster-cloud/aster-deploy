@@ -52,6 +52,26 @@ task signing-api:image
 
 ---
 
+## 测试
+
+```bash
+# 单元 + zod / canonical-json 测试（默认 mock vault，无依赖）
+pnpm test
+
+# 集成测试：起一个真 Vault Transit 容器，跑 approve → sign → verify ed25519 全链路
+# 自动探测 docker 或 podman；如果都没有 → describe 整体 skip 并打印原因。
+# 显式 skip：SKIP_VAULT_INTEGRATION=1 pnpm test:integration
+# 强制指定 runtime：VAULT_CONTAINER_CMD=podman pnpm test:integration
+pnpm test:integration
+```
+
+集成测试当前覆盖 12 个场景：happy-path Ed25519 round-trip、replay、过期 JWT、
+crossed keyId、缺/坏 deploymentBinding、operator==witness、未签发的
+approvalToken、payload tamper、approval TTL 过期、revocation purpose 不要求
+binding、approve 限速、Vault 不可达 502+audit。
+
+---
+
 ## Vault Policy
 
 本 service 的 Vault token 必须只允许 Transit sign，不允许 export、backup、key management。
