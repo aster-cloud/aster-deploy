@@ -2,7 +2,12 @@ FROM node:24-alpine AS deps
 WORKDIR /app
 RUN corepack enable
 COPY package.json pnpm-lock.yaml* ./
-RUN pnpm install --frozen-lockfile=false
+# --ignore-scripts: skip native build hooks (cpu-features / ssh2 /
+# esbuild / protobufjs etc. ride in via testcontainers as devDeps and
+# are not exercised at runtime — pnpm prune --prod in the build stage
+# removes them entirely). pnpm 11 otherwise refuses the install with
+# ERR_PNPM_IGNORED_BUILDS.
+RUN pnpm install --frozen-lockfile=false --ignore-scripts
 
 FROM deps AS build
 WORKDIR /app
