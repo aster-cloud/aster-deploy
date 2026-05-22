@@ -17,9 +17,11 @@
 #   ./scripts/e2e-local.sh --local --only api    # 仅跑某 stage
 #
 # 前置：
-#   - ASTER_REPOS_DIR 指向各 aster-* repo 的父目录（默认 ${HOME}/IdeaProjects）
+#   - ASTER_REPOS_DIR 指向各 aster-* repo 的父目录（默认脚本所在 repo 的父目录）
 #   - 或为每个项目单独设 ASTER_<NAME>_DIR
-#   - --local 模式还需要本机 Docker 守护进程（testcontainers / Postgres / Redis）
+#   - --local 模式还需要本机容器运行时（docker 优先 / podman 回退；
+#     podman rootless 需先 `systemctl --user start podman.socket` 或
+#     macOS 上 `podman machine start`）
 #
 # 退出码:
 #   0  全部 stage 通过
@@ -140,6 +142,54 @@ ensure_cmd() {
   fi
 }
 
+# 容器运行时检测：优先 docker，其次 podman（CLI 表面兼容：run/exec/ps/stop/info）。
+# 选定后：
+#  - 通过 CONTAINER_CLI 变量替代脚本里的硬编码 docker 调用
+#  - 当用 podman 时，导出 testcontainers 必需的 socket / ryuk 配置，
+#    让 ./gradlew integrationTest 在 podman 上也能跑（否则 testcontainers
+#    会默认找 /var/run/docker.sock，podman 默认 socket 路径不同）
+CONTAINER_CLI=""
+detect_container_cli() {
+  if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+    CONTAINER_CLI="docker"
+    log_success "容器运行时: docker"
+    return 0
+  fi
+  if command -v podman >/dev/null 2>&1; then
+    CONTAINER_CLI="podman"
+    # 找 podman socket 路径（rootless 默认 $XDG_RUNTIME_DIR/podman/podman.sock）
+    local sock=""
+    if [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -S "${XDG_RUNTIME_DIR}/podman/podman.sock" ]; then
+      sock="unix://${XDG_RUNTIME_DIR}/podman/podman.sock"
+    elif [ -S "/run/user/$(id -u)/podman/podman.sock" ]; then
+      sock="unix:///run/user/$(id -u)/podman/podman.sock"
+    elif [ -S "/var/run/docker.sock" ]; then
+      # podman-mac-helper 或 Docker Desktop compat 模式
+      sock="unix:///var/run/docker.sock"
+    fi
+    if [ -n "$sock" ]; then
+      export DOCKER_HOST="$sock"
+      # testcontainers 必需：让它跳过 docker-compose-cli 检查 + 信任 podman
+      export TESTCONTAINERS_RYUK_DISABLED="${TESTCONTAINERS_RYUK_DISABLED:-true}"
+      export TESTCONTAINERS_CHECKS_DISABLE="${TESTCONTAINERS_CHECKS_DISABLE:-true}"
+      log_success "容器运行时: podman (DOCKER_HOST=${sock}, ryuk disabled)"
+    else
+      log_warn "容器运行时: podman 已安装但未找到可用 socket"
+      log_warn "  rootless 模式启动: systemctl --user start podman.socket"
+      log_warn "  或 macOS: podman machine start"
+      return 1
+    fi
+    # 确认 podman 守护进程可用
+    if ! podman info >/dev/null 2>&1; then
+      log_error "podman 不可用（machine 未启动？）"
+      return 1
+    fi
+    return 0
+  fi
+  log_error "未检测到容器运行时（需要 docker 或 podman）"
+  return 1
+}
+
 ensure_dir() {
   local label="$1" dir="$2"
   if [ ! -d "$dir" ]; then
@@ -211,12 +261,8 @@ stage_preflight() {
   ensure_cmd pnpm   "pnpm 10+ 必需（所有 TS workspace）"
 
   if [ "$LOCAL_MODE" = "1" ]; then
-    # 本地模式额外需要 docker（testcontainers）
-    ensure_cmd docker "用于 testcontainers / 本地 Postgres+Redis"
-    if ! docker info >/dev/null 2>&1; then
-      log_error "docker daemon 未运行"
-      return 1
-    fi
+    # 本地模式额外需要容器运行时（docker 或 podman）
+    detect_container_cli || return 1
   fi
 
   ensure_dir "aster-api"          "$(repo_dir api)"
@@ -311,21 +357,21 @@ stage_api_e2e() {
   fi
 
   # --local 模式：起一个轻量 Postgres+Redis 跑端到端冒烟
-  log_info "启动本地 Postgres + Redis（docker run）"
+  log_info "启动本地 Postgres + Redis（${CONTAINER_CLI} run）"
   local pg_name="aster-e2e-pg-$$" redis_name="aster-e2e-redis-$$"
-  docker run -d --rm --name "$pg_name" \
+  "$CONTAINER_CLI" run -d --rm --name "$pg_name" \
     -e POSTGRES_DB=aster_e2e -e POSTGRES_USER=aster -e POSTGRES_PASSWORD=aster \
     -p 15432:5432 postgres:17-alpine >/dev/null
-  docker run -d --rm --name "$redis_name" \
+  "$CONTAINER_CLI" run -d --rm --name "$redis_name" \
     -p 16379:6379 redis:7-alpine >/dev/null
 
   # 注册清理（trap 会调用）
-  CLEANUP_PIDS+=("DOCKER:$pg_name" "DOCKER:$redis_name")
+  CLEANUP_PIDS+=("CONTAINER:$pg_name" "CONTAINER:$redis_name")
 
   # 等 Postgres
   local i
   for i in $(seq 1 30); do
-    docker exec "$pg_name" pg_isready -U aster >/dev/null 2>&1 && break
+    "$CONTAINER_CLI" exec "$pg_name" pg_isready -U aster >/dev/null 2>&1 && break
     sleep 1
   done
 
@@ -418,22 +464,23 @@ stage_ci_only_notice() {
   fi
 }
 
-# ═══ docker container 清理（运行 stage_api_e2e 时启动的） ═══════════════
-cleanup_docker_containers() {
+# ═══ 容器清理（运行 stage_api_e2e 时启动的 docker/podman 容器） ═══════════
+cleanup_containers() {
+  [ -z "${CONTAINER_CLI:-}" ] && return 0  # 未用过容器运行时，直接返回
   local entry
   for entry in "${CLEANUP_PIDS[@]:-}"; do
     case "$entry" in
-      DOCKER:*)
-        local cname="${entry#DOCKER:}"
-        if docker ps --format '{{.Names}}' | grep -qx "$cname"; then
+      CONTAINER:*)
+        local cname="${entry#CONTAINER:}"
+        if "$CONTAINER_CLI" ps --format '{{.Names}}' 2>/dev/null | grep -qx "$cname"; then
           log_info "停止容器 ${cname}"
-          docker stop "$cname" >/dev/null 2>&1 || true
+          "$CONTAINER_CLI" stop "$cname" >/dev/null 2>&1 || true
         fi
         ;;
     esac
   done
 }
-trap 'cleanup_docker_containers; cleanup' EXIT INT TERM
+trap 'cleanup_containers; cleanup' EXIT INT TERM
 
 # ═══ 主流程 ════════════════════════════════════════════════════════════
 GLOBAL_START=$(date +%s)
