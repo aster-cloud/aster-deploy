@@ -14,19 +14,21 @@ RUN pnpm prune --prod
 FROM node:24-alpine AS runtime
 WORKDIR /app
 
-RUN addgroup -g 1000 nodeuser \
-  && adduser -D -u 1000 -G nodeuser nodeuser \
-  && mkdir -p /var/log/license-signing-api \
-  && chown -R nodeuser:nodeuser /var/log/license-signing-api /app
+# node:24-alpine already provides a `node` user (UID 1000) + group; reuse
+# rather than creating a duplicate `nodeuser` at the same UID which fails
+# with "addgroup: gid '1000' in use". Only the audit-log directory needs
+# explicit chown since /app is the WORKDIR and gets COPY --chown below.
+RUN mkdir -p /var/log/license-signing-api \
+  && chown -R node:node /var/log/license-signing-api /app
 
 ENV NODE_ENV=production
 ENV PORT=8443
 
-COPY --from=build --chown=nodeuser:nodeuser /app/package.json ./package.json
-COPY --from=build --chown=nodeuser:nodeuser /app/node_modules ./node_modules
-COPY --from=build --chown=nodeuser:nodeuser /app/dist ./dist
+COPY --from=build --chown=node:node /app/package.json ./package.json
+COPY --from=build --chown=node:node /app/node_modules ./node_modules
+COPY --from=build --chown=node:node /app/dist ./dist
 
-USER nodeuser
+USER node
 
 EXPOSE 8443
 HEALTHCHECK --interval=10s --timeout=3s --retries=5 \
