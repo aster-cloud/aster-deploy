@@ -11,6 +11,8 @@ on:
     paths:
       - services/license-signing-api/**
       - .github/workflows/license-signing-api.yml
+  # Manual trigger for re-runs after secret/credential changes.
+  workflow_dispatch:
 
 permissions:
   contents: read
