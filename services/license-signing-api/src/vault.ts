@@ -61,7 +61,9 @@ export class VaultTransitClient implements VaultClient {
     const body = (await res.json()) as { data?: { signature?: string } };
     const signature = body.data?.signature ?? '';
     const match = /^vault:v([0-9]+):(.+)$/.exec(signature);
-    if (!match) {
+    // Both capture groups are required by the pattern; under strict mode
+    // TS still types match[N] as string | undefined, so check explicitly.
+    if (!match || match[1] === undefined || match[2] === undefined) {
       throw new AppError(502, 'vault-signature-invalid', 'Vault signature format invalid');
     }
 

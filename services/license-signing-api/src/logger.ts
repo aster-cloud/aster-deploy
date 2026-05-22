@@ -5,24 +5,32 @@ const version = process.env.npm_package_version ?? '0.1.0';
 const level = process.env.LOG_LEVEL ?? 'info';
 const isProd = process.env.NODE_ENV === 'production';
 
-export const logger = pino({
+// exactOptionalPropertyTypes: pino's `transport` option does not accept
+// `undefined`; omit the key entirely in production instead.
+const baseOptions = {
   level,
   base: {
     service,
     version,
   },
   timestamp: pino.stdTimeFunctions.isoTime,
-  transport: isProd
-    ? undefined
+};
+
+export const logger = pino(
+  isProd
+    ? baseOptions
     : {
-        target: 'pino-pretty',
-        options: {
-          colorize: true,
-          singleLine: true,
-          translateTime: 'SYS:standard',
+        ...baseOptions,
+        transport: {
+          target: 'pino-pretty',
+          options: {
+            colorize: true,
+            singleLine: true,
+            translateTime: 'SYS:standard',
+          },
         },
       },
-});
+);
 
 export type RequestLogger = ReturnType<typeof withRequestId>;
 

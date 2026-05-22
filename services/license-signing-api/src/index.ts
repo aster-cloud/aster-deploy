@@ -169,7 +169,11 @@ function waitForInflight(
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const config = loadConfig();
-  const audit = new JsonlAuditLogger(
+  // Widen to AuditLogger so the optional `close?()` shape is visible to
+  // the graceful-shutdown caller. JsonlAuditLogger doesn't implement
+  // close (open-per-write), but the typeof-guard at the call site is
+  // the correct shape only when the variable carries the interface type.
+  const audit: AuditLogger = new JsonlAuditLogger(
     config.AUDIT_LOG_PATH,
     config.LICENSES_SLACK_WEBHOOK || undefined,
   );

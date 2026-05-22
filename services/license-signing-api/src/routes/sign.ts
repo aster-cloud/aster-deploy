@@ -98,6 +98,8 @@ export function createSignRoutes(deps: AppDeps): Hono<{ Variables: AppVariables 
       operatorSession,
     });
 
+    // exactOptionalPropertyTypes: spread licenseId only when defined.
+    const licenseIdForAudit = parseLicenseId(body.purpose, body.payload);
     await deps.audit.append({
       requestId,
       event: 'approval',
@@ -106,7 +108,7 @@ export function createSignRoutes(deps: AppDeps): Hono<{ Variables: AppVariables 
       purpose: body.purpose,
       approvalToken: approval.approvalToken,
       payloadSha256,
-      licenseId: parseLicenseId(body.purpose, body.payload),
+      ...(licenseIdForAudit !== undefined ? { licenseId: licenseIdForAudit } : {}),
     });
 
     return c.json({
@@ -208,6 +210,7 @@ export function createSignRoutes(deps: AppDeps): Hono<{ Variables: AppVariables 
 
     try {
       const signed = await deps.vault.sign(body.keyId, canonicalPayload);
+      const licenseIdForSign = parseLicenseId(body.purpose, body.payload);
       await deps.audit.append({
         requestId,
         event: 'sign',
@@ -218,7 +221,7 @@ export function createSignRoutes(deps: AppDeps): Hono<{ Variables: AppVariables 
         approvalToken: body.approvalToken,
         payloadSha256,
         vaultKeyVersion: signed.keyVersion,
-        licenseId: parseLicenseId(body.purpose, body.payload),
+        ...(licenseIdForSign !== undefined ? { licenseId: licenseIdForSign } : {}),
       });
       return c.json({
         signature: signed.signatureBase64Url,

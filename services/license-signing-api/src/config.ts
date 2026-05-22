@@ -63,9 +63,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       'VAULT_TOKEN or VAULT_TOKEN_FILE must be set (Vault Agent Injector writes /vault/secrets/vault-token)',
     );
   }
+  // exactOptionalPropertyTypes: only set keys when defined; never pass
+  // explicit `undefined` for optional properties.
   const readVaultToken = makeTokenReader({
-    inlineToken: parsed.VAULT_TOKEN,
-    tokenFile: parsed.VAULT_TOKEN_FILE,
+    ...(parsed.VAULT_TOKEN !== undefined ? { inlineToken: parsed.VAULT_TOKEN } : {}),
+    ...(parsed.VAULT_TOKEN_FILE !== undefined ? { tokenFile: parsed.VAULT_TOKEN_FILE } : {}),
   });
   // 启动时 eager 校验 token 至少可读
   readVaultToken();

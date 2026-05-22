@@ -1,6 +1,8 @@
+import type { ContentfulStatusCode } from 'hono/utils/http-status';
+
 export class AppError extends Error {
   constructor(
-    public readonly status: number,
+    public readonly status: ContentfulStatusCode,
     public readonly code: string,
     message: string,
   ) {
@@ -14,7 +16,7 @@ export function errorReason(err: unknown): string {
   return 'unknown-error';
 }
 
-export function publicStatus(err: unknown): number {
+export function publicStatus(err: unknown): ContentfulStatusCode {
   if (err instanceof AppError) return err.status;
   return 500;
 }
