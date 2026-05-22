@@ -261,8 +261,13 @@ stage_preflight() {
   ensure_cmd pnpm   "pnpm 10+ 必需（所有 TS workspace）"
 
   if [ "$LOCAL_MODE" = "1" ]; then
-    # 本地模式额外需要容器运行时（docker 或 podman）
-    detect_container_cli || return 1
+    # 本地模式额外需要容器运行时（docker 或 podman）。检测函数已在主流程
+    # 提前调用并 export，这里只校验是否设置成功 —— 在 subshell 里再调一次
+    # detect_container_cli 没用（export 出不去 run_stage 的 subshell）。
+    if [ -z "${CONTAINER_CLI:-}" ]; then
+      log_error "未检测到容器运行时（在 preflight 前已尝试）"
+      return 1
+    fi
   fi
 
   ensure_dir "aster-api"          "$(repo_dir api)"
@@ -407,18 +412,37 @@ stage_api_e2e() {
 
   log_info "POST /api/v1/policies/evaluate-source 冒烟"
   local resp
+  # 使用规范 CNL 语法（参见 aster-api/src/test/java/io/aster/policy/parser/
+  # NaturalLanguageParserTest.java testNaturalLanguageOperators）：
+  # `Rule <name> given <params>:` + `If/Return` + 关键字运算符
+  # （greater than / less than / plus / minus / times / divided by），
+  # 而不是符号 (>, <, +, -, *, /)。
   resp=$(curl -fsS -X POST http://localhost:18080/api/v1/policies/evaluate-source \
     -H 'Content-Type: application/json' \
     -H 'X-Tenant-Id: e2e-tenant' \
     -d '{
-      "source": "Module e2e.smoke. Rule evaluate given amount: amount > 100.",
+      "source": "Module e2e.smoke.\n\nRule evaluate given amount:\n  If amount greater than 100\n    Return 1.\n  Return 0.",
       "context": { "amount": 150 },
       "locale": "en-US",
       "functionName": "evaluate"
     }')
   echo "$resp" | head -1
-  echo "$resp" | grep -q '"result"' || { log_error "evaluate-source 响应缺少 result 字段"; return 1; }
-  log_success "evaluate-source 冒烟通过"
+  # 真正的成功判断：result 字段非 null，且 error 字段是 null（或缺失）。
+  # 响应形如 {"result":1,"executionTimeMs":7,"error":null} → 通过；
+  # {"result":null,"error":"..."} → 失败。
+  if echo "$resp" | grep -qE '"error":"[^"]'; then
+    log_error "evaluate-source 返回非空 error: ${resp}"
+    return 1
+  fi
+  if echo "$resp" | grep -q '"result":null'; then
+    log_error "evaluate-source 返回 result: null（CNL 执行未产生值）: ${resp}"
+    return 1
+  fi
+  if ! echo "$resp" | grep -qE '"result":(true|false|"[^"]*"|-?[0-9])'; then
+    log_error "evaluate-source 响应缺少有效 result: ${resp}"
+    return 1
+  fi
+  log_success "evaluate-source 冒烟通过（result=$(echo "$resp" | grep -oE '"result":[^,]*' | head -1)）"
 }
 
 stage_cloud() {
@@ -489,6 +513,17 @@ log_info "Aster 端到端集成测试（mode=$([ $LOCAL_MODE = 1 ] && echo local
 log_info "ASTER_REPOS_DIR=${ASTER_REPOS_DIR}"
 [ ${#SKIP_STAGES[@]} -gt 0 ] && log_info "skip: ${SKIP_STAGES[*]}"
 [ ${#ONLY_STAGES[@]} -gt 0 ] && log_info "only: ${ONLY_STAGES[*]}"
+
+# 容器运行时检测必须在 run_stage 主循环之前完成，否则 CONTAINER_CLI 和相关
+# export 只在 stage 的 subshell 内有效，下一个 stage 看不到。仅 --local 模式
+# 需要容器运行时；CI-parity 模式下 testcontainers 自己处理。
+if [ "$LOCAL_MODE" = "1" ]; then
+  detect_container_cli || {
+    log_error "容器运行时检测失败，--local 模式无法继续"
+    exit 1
+  }
+  export CONTAINER_CLI
+fi
 
 # stage 失败不立即退出 —— 收集后统一汇总，便于一次跑完看全貌。
 # 单 stage 内部仍用 set -e 行为（subshell + run_stage 检查 exit code）
