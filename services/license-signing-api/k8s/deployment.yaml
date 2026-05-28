@@ -34,7 +34,13 @@ spec:
           type: RuntimeDefault
       containers:
         - name: api
-          # 默认 :latest；生产部署用 kustomize images 或 ArgoCD Image Updater 替换为 sha tag
+          # P1-R21 (audit): `:latest` is the template default. Production
+          # deployments MUST override via `kustomize edit set image
+          # docker.io/wontlost/aster-license-signing-api=...:sha-<digest>`
+          # before applying. ArgoCD Image Updater handles this on synced
+          # clusters; raw kubectl apply users must override manually.
+          # `imagePullPolicy: IfNotPresent` here is intentional — once a
+          # digest is pinned, pulling on every restart wastes bandwidth.
           image: docker.io/wontlost/aster-license-signing-api:latest
           imagePullPolicy: IfNotPresent
           ports:

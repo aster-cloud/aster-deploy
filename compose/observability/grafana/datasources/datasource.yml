@@ -9,16 +9,19 @@ datasources:
     editable: false
 
   # WAADR 物化视图查询专用，连 aster-api 的 Postgres
+  # P0-R21: 密码从 .env 注入, 禁止 commit 明文凭证.
+  # 本地开发: cp .env.example .env && 设 GF_POSTGRES_PASSWORD
+  # 生产 (k3s): 通过 ExternalSecret + Vault 注入 (见 ../README.md "secret rotation")
   - name: Postgres-Aster
     type: postgres
     uid: postgres
     access: proxy
     url: host.containers.internal:5432
-    user: postgres
+    user: ${GF_POSTGRES_USER:-postgres}
     secureJsonData:
-      password: postgres
+      password: ${GF_POSTGRES_PASSWORD}
     jsonData:
-      database: aster_policy
+      database: ${GF_POSTGRES_DB:-aster_policy}
       sslmode: disable
       postgresVersion: 1700
     editable: false
