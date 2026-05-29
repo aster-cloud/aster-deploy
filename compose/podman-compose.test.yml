@@ -27,6 +27,11 @@ services:
       NEXT_PUBLIC_ASTER_POLICY_API_URL: http://localhost:${LOCAL_API_PORT:-8080}
       NEXT_PUBLIC_ASTER_POLICY_WS_URL: ws://localhost:${LOCAL_API_PORT:-8080}/ws/preview
       ASTER_POLICY_API_INTERNAL_URL: http://api:8080
+      # R32 audit P1：本文件仅用于本地 / CI test mode 启动。
+      # NEXTAUTH_SECRET 是确定值是为了 e2e 测试可重现；DATABASE_URL 走
+      # localhost-only podman bridge，不暴露任何端口到 host。生产环境
+      # 用 k3s ExternalSecret + Vault，本文件永远不应在生产路径上。
+      # 如果本字符串出现在生产日志 / pod env，立刻 page 安全团队。
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/aster_cloud
       NEXTAUTH_SECRET: test-secret-do-not-use-in-production
       NEXTAUTH_URL: http://localhost:${LOCAL_CLOUD_PORT:-3000}
