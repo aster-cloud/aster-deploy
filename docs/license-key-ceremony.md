@@ -13,8 +13,10 @@
 |---|-------------|------|------------|--------------|--------|
 | 1 | License Signing Key | 生产 license v2 签发 | `transit/keys/license-signing-v2-2026-01` | `exportable=false`, `allow_plaintext_backup=false` | `scripts/license-issue.sh`、Vault Transit sign |
 | 2 | Revocation Signing Key | revocation manifest 签名 | `transit/keys/revocation-signing-v2-2026-01` | `exportable=false`, `allow_plaintext_backup=false` | revocation publisher |
+| 2b | Regression Transition Signing Key | ★P0-A S1（信任层5）：签 upgrade-manifest（baseline X→current Y 被批准的升级） | `transit/keys/regression-transition-signing-v2-2026-01` | `exportable=false`, `allow_plaintext_backup=false` | license-signing-api `purpose=regression-transition`（密钥分离，见 vault-policy.hcl） |
 | 3 | License Public Key | on-prem trust bundle 验签 | `transit/keys/license-signing-v2-2026-01` read output | 仅公钥 | aster-cloud `src/lib/license-trust-bundle.ts` |
 | 4 | Revocation Public Key | revoked.json 验签 | `transit/keys/revocation-signing-v2-2026-01` read output | 仅公钥 | on-prem revocation verifier |
+| 4b | Regression Transition Public Key | upgrade-manifest 验签 | `transit/keys/regression-transition-signing-v2-2026-01` read output | 仅公钥 | aster-cloud `src/lib/license-trust-bundle.ts`（`regression-transition` purpose entry）、`regression-transition-verify.ts` |
 | 5 | Public Key Fingerprints | 人工核验与发布审计 | `secret/license/metadata/v2-2026-01` | SHA-256(pubkey bytes) | release checklist、纸质备份 |
 | 6 | Backup License Key | 主 Vault 失效时恢复签发 | 独立 air-gapped Vault Transit | 私钥不离开 backup Vault | break-glass ceremony |
 | 7 | Backup Revocation Key | 主 revocation key 失效时恢复 | 独立 air-gapped Vault Transit | 私钥不离开 backup Vault | break-glass ceremony |
@@ -163,6 +165,39 @@ vault read -format=json transit/keys/revocation-signing-v2-2026-01 \
 
 ---
 
+## 3b. 生成 Regression Transition Signing Key（★P0-A S1，信任层5）
+
+★**密钥分离**（用户拍板）：regression-transition upgrade-manifest 用**独立** Vault Transit key（与 license /
+revocation **物理分离**）——即使 license/revocation key 泄露也不能伪造升级授权 manifest，反之亦然。key name
+前缀必须是 `regression-transition-signing-`（license-signing-api 的 `assertKeyPurpose` 强制 purpose↔前缀绑定，
+`ALLOWED_KEY_IDS` regex 亦锁定）。
+
+### 执行步骤
+```bash
+vault write -f transit/keys/regression-transition-signing-v2-2026-01 \
+  type=ed25519 \
+  exportable=false \
+  allow_plaintext_backup=false
+```
+
+### 验证
+```bash
+vault read -format=json transit/keys/regression-transition-signing-v2-2026-01 \
+  | jq '{name: .data.name, type: .data.type, exportable: .data.exportable, allow_plaintext_backup: .data.allow_plaintext_backup}'
+```
+
+期望与 license signing key 相同，但 key name 必须是 `regression-transition-signing-v2-2026-01`。
+
+### 授权（policy 已含通配路径）
+license-signing-api 的 service token policy（`services/license-signing-api/vault-policy.hcl`）已含通配路径
+`transit/sign/regression-transition-signing-*` + `transit/keys/regression-transition-signing-*`（PR-A 加），故
+**新 key 无需改 policy**——但 policy 若有更新须**手动重新 apply**（k3s/CI 不自动加载 Vault policy）：
+```bash
+vault policy write license-signing-api services/license-signing-api/vault-policy.hcl
+```
+
+---
+
 ## 4. 提取 Public Key 并计算 Fingerprint
 
 ### 执行步骤
@@ -174,6 +209,12 @@ LICENSE_PUBKEY_B64="$(
 
 REVOCATION_PUBKEY_B64="$(
   vault read -format=json transit/keys/revocation-signing-v2-2026-01 \
+    | jq -r '[.. | objects | .public_key? // empty][0]'
+)"
+
+# ★P0-A S1：regression-transition 公钥（供 aster-cloud trust-bundle 的 regression-transition entry）。
+REGRESSION_PUBKEY_B64="$(
+  vault read -format=json transit/keys/regression-transition-signing-v2-2026-01 \
     | jq -r '[.. | objects | .public_key? // empty][0]'
 )"
 
@@ -191,8 +232,16 @@ REVOCATION_FINGERPRINT="$(
     | awk '{print $1}'
 )"
 
+REGRESSION_FINGERPRINT="$(
+  printf '%s' "$REGRESSION_PUBKEY_B64" \
+    | openssl base64 -d -A \
+    | openssl dgst -sha256 -r \
+    | awk '{print $1}'
+)"
+
 printf 'license-signing-v2-2026-01 %s\n' "$LICENSE_FINGERPRINT"
 printf 'revocation-signing-v2-2026-01 %s\n' "$REVOCATION_FINGERPRINT"
+printf 'regression-transition-signing-v2-2026-01 %s\n' "$REGRESSION_FINGERPRINT"
 ```
 
 ### 写入 metadata
@@ -204,10 +253,18 @@ vault kv put secret/license/metadata/v2-2026-01 \
   revocationKeyId="revocation-signing-v2-2026-01" \
   revocationPublicKeyB64="$REVOCATION_PUBKEY_B64" \
   revocationFingerprintSha256="$REVOCATION_FINGERPRINT" \
+  regressionTransitionKeyId="regression-transition-signing-v2-2026-01" \
+  regressionTransitionPublicKeyB64="$REGRESSION_PUBKEY_B64" \
+  regressionTransitionFingerprintSha256="$REGRESSION_FINGERPRINT" \
   ceremonyDate="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   operator="$(vault token lookup -format=json | jq -r '.data.display_name')" \
   witness="<recorded-on-paper>"
 ```
+
+★**后续（独立 aster-cloud release PR，非本 ceremony）**：把 `regressionTransitionPublicKeyB64` +
+`regressionTransitionFingerprintSha256` 填进 aster-cloud `src/lib/license-trust-bundle.ts` 的 `BASE_BUNDLE`
+（`regression-transition` purpose entry，替换 dev 占位 `__dev-regr-2026-01__`）。CI 断言 pubKey↔fingerprint
+一致。on-prem 生产 build 若残留 `__dev-*` 会启动即 throw（防 dev 占位上生产）。
 
 ### 纸质备份
 纸质记录只写 public key fingerprint、公钥 base64、key id、Vault path、录屏文件 SHA-256。Operator 与 Witness 双签。纸质备份编号写入 Vault metadata。
