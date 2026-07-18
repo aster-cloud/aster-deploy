@@ -4,9 +4,9 @@ import { z } from 'zod';
 import type { AppDeps, AppVariables } from '../index.js';
 import { AppError } from '../errors.js';
 import { base64url, canonicalStringify, sha256Hex } from '../canonical-json.js';
-import { assertKeyPurpose } from '../vault.js';
+import { assertKeyPurpose, type Purpose } from '../vault.js';
 
-const PurposeSchema = z.enum(['license', 'revocation']);
+const PurposeSchema = z.enum(['license', 'revocation', 'regression-transition']);
 
 const ApproveBodySchema = z.object({
   purpose: PurposeSchema,
@@ -34,7 +34,7 @@ const DeploymentBindingSchema = z.object({
  * surface for on-prem; revocation payloads have a different schema (no
  * binding) and are not affected.
  */
-function assertLicenseBinding(purpose: 'license' | 'revocation', payload: unknown): void {
+function assertLicenseBinding(purpose: Purpose, payload: unknown): void {
   if (purpose !== 'license') return;
   const binding = (payload as Record<string, unknown> | null)?.deploymentBinding;
   const parsed = DeploymentBindingSchema.safeParse(binding);
@@ -43,6 +43,49 @@ function assertLicenseBinding(purpose: 'license' | 'revocation', payload: unknow
       400,
       'binding-required',
       'license payload must include deploymentBinding { deploymentId, deploymentLabel, deploymentUrl? }',
+    );
+  }
+}
+
+// ★P0-A S1（Codex 复审阻断修复）：regression-transition 的**被签 payload 必须自证协议域**。
+// 密钥分离只锁定「哪个 key 签」——若 payload 是任意 z.record，签名工件不自证「我是一个合法、有方向的
+// upgrade-manifest」，攻击者可用 transition key 签一个 payload={purpose:'license'} 或缺 X→Y 的任意对象，
+// 留下跨协议解释风险。故强制严格 schema：payload.purpose 必须 === 外层 purpose，且含有方向的 X≠Y toolchain
+// 对 + policyId + approvedBy。这些字段**在 payload 内**，payload 被 Vault 签 → 签名工件绑定协议域。
+const RegressionTransitionManifestSchema = z.object({
+  schemaVersion: z.literal(1),
+  purpose: z.literal('regression-transition'),
+  baselineToolchainId: z.string().min(1).max(512),
+  currentToolchainId: z.string().min(1).max(512),
+  policyId: z.string().min(1).max(256),
+  // ★approvedBy = **业务审批元数据**（谁在业务上批准了这次升级），非 ceremony 的密码学身份——
+  // 真正的密码学 2-人身份是 operator/witness JWT（sign 时校验 operator≠witness）。此字段只作审计声明，
+  // 不绑定 operator.sub（Codex 复审非阻断提醒：语义边界诚实标注）。
+  approvedBy: z.string().min(1).max(256),
+}).passthrough(); // 允许附加字段（前向兼容），但上列为必需。
+
+/**
+ * Reject regression-transition sign requests whose payload is not a well-formed,
+ * directional upgrade-manifest. Ensures the **signed bytes** self-declare purpose
+ * (must equal outer purpose) and a real X→Y transition — key separation alone does
+ * not bind the protocol domain (Codex cross-review blocker).
+ */
+function assertRegressionTransitionManifest(purpose: Purpose, payload: unknown): void {
+  if (purpose !== 'regression-transition') return;
+  const parsed = RegressionTransitionManifestSchema.safeParse(payload);
+  if (!parsed.success) {
+    throw new AppError(
+      400,
+      'manifest-invalid',
+      'regression-transition payload must be a manifest { schemaVersion:1, purpose:"regression-transition", baselineToolchainId, currentToolchainId, policyId, approvedBy }',
+    );
+  }
+  // 方向性：X≠Y（升级必须有方向；baseline===current 不是升级）。承 P0-1 baseline!==current 语义。
+  if (parsed.data.baselineToolchainId === parsed.data.currentToolchainId) {
+    throw new AppError(
+      400,
+      'manifest-not-directional',
+      'regression-transition manifest baselineToolchainId must differ from currentToolchainId (no directional upgrade otherwise)',
     );
   }
 }
@@ -59,7 +102,7 @@ function parseLicenseId(purpose: string, payload: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
 }
 
-function validateKeyId(deps: AppDeps, purpose: 'license' | 'revocation', keyId: string): void {
+function validateKeyId(deps: AppDeps, purpose: Purpose, keyId: string): void {
   if (!deps.config.allowedKeyIdRegex.test(keyId)) {
     throw new AppError(400, 'key-not-allowed', 'keyId not allowed');
   }
@@ -85,6 +128,7 @@ export function createSignRoutes(deps: AppDeps): Hono<{ Variables: AppVariables 
     const body = ApproveBodySchema.parse(await c.req.json());
     validateKeyId(deps, body.purpose, body.keyId);
     assertLicenseBinding(body.purpose, body.payload);
+    assertRegressionTransitionManifest(body.purpose, body.payload);
 
     const canonicalPayload = canonicalStringify(body.payload);
     const payloadSha256 = sha256Hex(canonicalPayload);
@@ -150,6 +194,7 @@ export function createSignRoutes(deps: AppDeps): Hono<{ Variables: AppVariables 
     const body = SignBodySchema.parse(await c.req.json());
     validateKeyId(deps, body.purpose, body.keyId);
     assertLicenseBinding(body.purpose, body.payload);
+    assertRegressionTransitionManifest(body.purpose, body.payload);
 
     if (deps.replay.has(witness.sub, body.approvalToken)) {
       await deps.audit.append({

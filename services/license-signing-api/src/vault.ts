@@ -2,7 +2,7 @@ import type { Config } from './config.js';
 import { base64url, fromBase64 } from './canonical-json.js';
 import { AppError } from './errors.js';
 
-export type Purpose = 'license' | 'revocation';
+export type Purpose = 'license' | 'revocation' | 'regression-transition';
 
 export interface VaultStatus {
   sealed: boolean;
@@ -24,6 +24,12 @@ export function assertKeyPurpose(purpose: Purpose, keyId: string): void {
   }
   if (purpose === 'revocation' && !keyId.startsWith('revocation-signing-')) {
     throw new AppError(400, 'purpose-key-mismatch', 'revocation purpose must use revocation-signing key');
+  }
+  // ★P0-A S1（信任层5 transition authorization）：独立 Vault Transit key（密钥分离 > purpose 字段分离），
+  // regression-transition purpose 必须用 regression-transition-signing 前缀的 key——即使 license/revocation
+  // key 泄露也不能伪造升级授权 manifest，反之亦然。
+  if (purpose === 'regression-transition' && !keyId.startsWith('regression-transition-signing-')) {
+    throw new AppError(400, 'purpose-key-mismatch', 'regression-transition purpose must use regression-transition-signing key');
   }
 }
 

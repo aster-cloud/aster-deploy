@@ -63,8 +63,17 @@ export class JsonlAuditLogger implements AuditLogger {
 
   private async postSlack(event: AuditEvent): Promise<void> {
     if (!this.slackWebhook) return;
+    // ★审计标签按 purpose 分——regression-transition/revocation sign 不该在合规审计里被标成
+    // "license signing event"（误导）。purpose 未知时回落通用 "signing event"。
+    const label = event.purpose === 'license'
+      ? 'license signing event'
+      : event.purpose === 'revocation'
+        ? 'revocation signing event'
+        : event.purpose === 'regression-transition'
+          ? 'regression-transition signing event'
+          : 'signing event';
     const body = {
-      text: `license signing event: operator=${event.operatorSub ?? '-'} witness=${event.witnessSub ?? '-'} key=${event.keyId ?? '-'} purpose=${event.purpose ?? '-'} licenseId=${event.licenseId ?? '-'}`,
+      text: `${label}: operator=${event.operatorSub ?? '-'} witness=${event.witnessSub ?? '-'} key=${event.keyId ?? '-'} purpose=${event.purpose ?? '-'} licenseId=${event.licenseId ?? '-'}`,
       metadata: {
         event_type: 'license_signing_api_sign',
         event_payload: {

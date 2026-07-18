@@ -11,6 +11,6 @@ data:
   JWT_ISSUER: "https://idp.aster.com"
   JWT_AUDIENCE: "aster-license-signing-api"
   JWT_JWKS_URL: "https://idp.aster.com/.well-known/jwks.json"
-  ALLOWED_KEY_IDS: "^(license|revocation)-signing-v2-[0-9]{4}-[0-9]{2}$"
+  ALLOWED_KEY_IDS: "^(license|revocation|regression-transition)-signing-v2-[0-9]{4}-[0-9]{2}$"
   AUDIT_LOG_PATH: "/var/log/license-signing-api/audit.jsonl"
   LOG_LEVEL: "info"

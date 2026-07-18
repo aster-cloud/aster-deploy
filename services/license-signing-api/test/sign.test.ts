@@ -18,11 +18,11 @@ function config(auditPath: string): Config {
     JWT_ISSUER: 'https://idp.aster.test',
     JWT_AUDIENCE: 'aster-license-signing-api',
     JWT_JWKS_URL: 'https://idp.aster.test/.well-known/jwks.json',
-    ALLOWED_KEY_IDS: '^(license|revocation)-signing-v2-[0-9]{4}-[0-9]{2}$',
+    ALLOWED_KEY_IDS: '^(license|revocation|regression-transition)-signing-v2-[0-9]{4}-[0-9]{2}$',
     AUDIT_LOG_PATH: auditPath,
     LICENSES_SLACK_WEBHOOK: '',
     LOG_LEVEL: 'error',
-    allowedKeyIdRegex: /^(license|revocation)-signing-v2-[0-9]{4}-[0-9]{2}$/,
+    allowedKeyIdRegex: /^(license|revocation|regression-transition)-signing-v2-[0-9]{4}-[0-9]{2}$/,
   };
 }
 
@@ -268,5 +268,132 @@ describe('signing flow', () => {
       }),
     });
     expect(res.status).toBe(200);
+  });
+
+  // ── P0-A S1（信任层5 transition authorization）：regression-transition purpose，mirror revocation ──
+
+  const REGR_KEY = 'regression-transition-signing-v2-2026-01';
+  const REGR_MANIFEST = {
+    schemaVersion: 1,
+    purpose: 'regression-transition',
+    baselineToolchainId: 'abi=1.0;core=1.0.13;validator=1;build=oldsha',
+    currentToolchainId: 'abi=1.0;core=1.0.14;validator=1;build=newsha',
+    policyId: 'pol-1',
+    approvedBy: 'user-approver',
+  };
+
+  it('regression-transition：full 2-人 ceremony approve+sign 通过（独立 key，无需 deploymentBinding）', async () => {
+    const subject = app();
+    const approve = await subject.app.request('/v1/approve', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-operator-jwt': 'operator' },
+      body: JSON.stringify({ purpose: 'regression-transition', keyId: REGR_KEY, payload: REGR_MANIFEST }),
+    });
+    expect(approve.status).toBe(200);
+    const approval = (await approve.json()) as { approvalToken: string };
+    const sign = await subject.app.request('/v1/sign', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-operator-jwt': 'operator',
+        'x-witness-jwt': 'witness',
+      },
+      body: JSON.stringify({
+        purpose: 'regression-transition', keyId: REGR_KEY, payload: REGR_MANIFEST,
+        approvalToken: approval.approvalToken,
+      }),
+    });
+    expect(sign.status).toBe(200);
+    const body = (await sign.json()) as { signature?: string; keyVersion?: string; canonicalPayload?: string };
+    expect(body.signature).toBeTruthy();
+    expect(body.canonicalPayload).toBeTruthy();
+  });
+
+  it('regression-transition：错 key 前缀（用 license key）→ 400 purpose-key-mismatch（密钥分离）', async () => {
+    const subject = app();
+    const res = await subject.app.request('/v1/approve', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-operator-jwt': 'operator' },
+      body: JSON.stringify({
+        purpose: 'regression-transition',
+        keyId: 'license-signing-v2-2026-01', // 错：应用 regression-transition-signing 前缀
+        payload: REGR_MANIFEST,
+      }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('regression-transition：反向——license purpose 用 regression-transition key → 400（密钥不可混用）', async () => {
+    const subject = app();
+    const res = await subject.app.request('/v1/approve', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-operator-jwt': 'operator' },
+      body: JSON.stringify({ purpose: 'license', keyId: REGR_KEY, payload: { schemaVersion: 2 } }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  // ── Codex 复审阻断修复：被签 payload 必须自证协议域（严格 manifest schema）──
+
+  async function approveRegr(payload: unknown) {
+    const subject = app();
+    return subject.app.request('/v1/approve', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-operator-jwt': 'operator' },
+      body: JSON.stringify({ purpose: 'regression-transition', keyId: REGR_KEY, payload }),
+    });
+  }
+
+  it('regression-transition：payload 缺 purpose → 400 manifest-invalid（签名体须自证协议域）', async () => {
+    const { purpose: _omit, ...noPurpose } = REGR_MANIFEST;
+    void _omit;
+    expect((await approveRegr(noPurpose)).status).toBe(400);
+  });
+
+  it('regression-transition：payload.purpose=license（≠外层）→ 400（防跨协议：不能用 transition key 签 license 声明）', async () => {
+    expect((await approveRegr({ ...REGR_MANIFEST, purpose: 'license' })).status).toBe(400);
+  });
+
+  it('regression-transition：缺 baselineToolchainId/currentToolchainId → 400（无 X→Y 不是 manifest）', async () => {
+    const { baselineToolchainId: _b, ...noBaseline } = REGR_MANIFEST;
+    void _b;
+    expect((await approveRegr(noBaseline)).status).toBe(400);
+    const { currentToolchainId: _cc, ...noCurrent } = REGR_MANIFEST;
+    void _cc;
+    expect((await approveRegr(noCurrent)).status).toBe(400);
+  });
+
+  it('regression-transition：baseline===current → 400 manifest-not-directional（升级必须有方向）', async () => {
+    const same = 'abi=1.0;core=1.0.14;validator=1;build=x';
+    expect((await approveRegr({ ...REGR_MANIFEST, baselineToolchainId: same, currentToolchainId: same })).status).toBe(400);
+  });
+
+  it('regression-transition：缺 policyId 或 approvedBy → 400（批准元数据必需）', async () => {
+    const { policyId: _p, ...noPolicy } = REGR_MANIFEST;
+    void _p;
+    expect((await approveRegr(noPolicy)).status).toBe(400);
+    const { approvedBy: _a, ...noApprover } = REGR_MANIFEST;
+    void _a;
+    expect((await approveRegr(noApprover)).status).toBe(400);
+  });
+
+  it('regression-transition：任意 payload（如 {foo:1}）→ 400（不再接受 z.record 任意对象）', async () => {
+    expect((await approveRegr({ foo: 1 })).status).toBe(400);
+  });
+
+  it('regression-transition：/sign 入口**也**独立校验 manifest（防未来误删 approve-only 守卫）', async () => {
+    // 直接打 /sign 带非法 manifest（无需先 approve）——sign 入口的 assertRegressionTransitionManifest
+    // 在 approval 消费/hash 比对**之前**就该 400 manifest-invalid（Codex 复审非阻断建议：锁 /sign 二次守卫）。
+    const subject = app();
+    const res = await subject.app.request('/v1/sign', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-operator-jwt': 'operator', 'x-witness-jwt': 'witness' },
+      body: JSON.stringify({
+        purpose: 'regression-transition', keyId: REGR_KEY,
+        payload: { foo: 1 }, // 非法 manifest
+        approvalToken: 'a'.repeat(64),
+      }),
+    });
+    expect(res.status).toBe(400);
   });
 });
