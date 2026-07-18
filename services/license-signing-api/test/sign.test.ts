@@ -332,4 +332,52 @@ describe('signing flow', () => {
     });
     expect(res.status).toBe(400);
   });
+
+  // ── Codex 复审阻断修复：被签 payload 必须自证协议域（严格 manifest schema）──
+
+  async function approveRegr(payload: unknown) {
+    const subject = app();
+    return subject.app.request('/v1/approve', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-operator-jwt': 'operator' },
+      body: JSON.stringify({ purpose: 'regression-transition', keyId: REGR_KEY, payload }),
+    });
+  }
+
+  it('regression-transition：payload 缺 purpose → 400 manifest-invalid（签名体须自证协议域）', async () => {
+    const { purpose: _omit, ...noPurpose } = REGR_MANIFEST;
+    void _omit;
+    expect((await approveRegr(noPurpose)).status).toBe(400);
+  });
+
+  it('regression-transition：payload.purpose=license（≠外层）→ 400（防跨协议：不能用 transition key 签 license 声明）', async () => {
+    expect((await approveRegr({ ...REGR_MANIFEST, purpose: 'license' })).status).toBe(400);
+  });
+
+  it('regression-transition：缺 baselineToolchainId/currentToolchainId → 400（无 X→Y 不是 manifest）', async () => {
+    const { baselineToolchainId: _b, ...noBaseline } = REGR_MANIFEST;
+    void _b;
+    expect((await approveRegr(noBaseline)).status).toBe(400);
+    const { currentToolchainId: _cc, ...noCurrent } = REGR_MANIFEST;
+    void _cc;
+    expect((await approveRegr(noCurrent)).status).toBe(400);
+  });
+
+  it('regression-transition：baseline===current → 400 manifest-not-directional（升级必须有方向）', async () => {
+    const same = 'abi=1.0;core=1.0.14;validator=1;build=x';
+    expect((await approveRegr({ ...REGR_MANIFEST, baselineToolchainId: same, currentToolchainId: same })).status).toBe(400);
+  });
+
+  it('regression-transition：缺 policyId 或 approvedBy → 400（批准元数据必需）', async () => {
+    const { policyId: _p, ...noPolicy } = REGR_MANIFEST;
+    void _p;
+    expect((await approveRegr(noPolicy)).status).toBe(400);
+    const { approvedBy: _a, ...noApprover } = REGR_MANIFEST;
+    void _a;
+    expect((await approveRegr(noApprover)).status).toBe(400);
+  });
+
+  it('regression-transition：任意 payload（如 {foo:1}）→ 400（不再接受 z.record 任意对象）', async () => {
+    expect((await approveRegr({ foo: 1 })).status).toBe(400);
+  });
 });

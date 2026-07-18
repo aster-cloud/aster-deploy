@@ -65,10 +65,11 @@ pnpm test
 pnpm test:integration
 ```
 
-集成测试当前覆盖 12 个场景：happy-path Ed25519 round-trip、replay、过期 JWT、
+集成测试当前覆盖 13 个场景：happy-path Ed25519 round-trip、replay、过期 JWT、
 crossed keyId、缺/坏 deploymentBinding、operator==witness、未签发的
 approvalToken、payload tamper、approval TTL 过期、revocation purpose 不要求
-binding、approve 限速、Vault 不可达 502+audit。
+binding、approve 限速、Vault 不可达 502+audit、regression-transition manifest
+经真 Vault 独立 key 签名+Ed25519 验签（P0-A S1，密钥分离）。
 
 ---
 
@@ -85,11 +86,20 @@ path "transit/sign/revocation-signing-*" {
   capabilities = ["update"]
 }
 
+# P0-A S1（信任层5 transition authorization）：签升级授权 manifest 的独立 key。
+path "transit/sign/regression-transition-signing-*" {
+  capabilities = ["update"]
+}
+
 path "transit/keys/license-signing-*" {
   capabilities = ["read"]
 }
 
 path "transit/keys/revocation-signing-*" {
+  capabilities = ["read"]
+}
+
+path "transit/keys/regression-transition-signing-*" {
   capabilities = ["read"]
 }
 
