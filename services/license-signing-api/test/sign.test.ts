@@ -380,4 +380,20 @@ describe('signing flow', () => {
   it('regression-transition：任意 payload（如 {foo:1}）→ 400（不再接受 z.record 任意对象）', async () => {
     expect((await approveRegr({ foo: 1 })).status).toBe(400);
   });
+
+  it('regression-transition：/sign 入口**也**独立校验 manifest（防未来误删 approve-only 守卫）', async () => {
+    // 直接打 /sign 带非法 manifest（无需先 approve）——sign 入口的 assertRegressionTransitionManifest
+    // 在 approval 消费/hash 比对**之前**就该 400 manifest-invalid（Codex 复审非阻断建议：锁 /sign 二次守卫）。
+    const subject = app();
+    const res = await subject.app.request('/v1/sign', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-operator-jwt': 'operator', 'x-witness-jwt': 'witness' },
+      body: JSON.stringify({
+        purpose: 'regression-transition', keyId: REGR_KEY,
+        payload: { foo: 1 }, // 非法 manifest
+        approvalToken: 'a'.repeat(64),
+      }),
+    });
+    expect(res.status).toBe(400);
+  });
 });

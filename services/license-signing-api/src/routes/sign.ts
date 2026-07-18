@@ -58,6 +58,9 @@ const RegressionTransitionManifestSchema = z.object({
   baselineToolchainId: z.string().min(1).max(512),
   currentToolchainId: z.string().min(1).max(512),
   policyId: z.string().min(1).max(256),
+  // ★approvedBy = **业务审批元数据**（谁在业务上批准了这次升级），非 ceremony 的密码学身份——
+  // 真正的密码学 2-人身份是 operator/witness JWT（sign 时校验 operator≠witness）。此字段只作审计声明，
+  // 不绑定 operator.sub（Codex 复审非阻断提醒：语义边界诚实标注）。
   approvedBy: z.string().min(1).max(256),
 }).passthrough(); // 允许附加字段（前向兼容），但上列为必需。
 
