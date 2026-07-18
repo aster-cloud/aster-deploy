@@ -18,11 +18,11 @@ function config(auditPath: string): Config {
     JWT_ISSUER: 'https://idp.aster.test',
     JWT_AUDIENCE: 'aster-license-signing-api',
     JWT_JWKS_URL: 'https://idp.aster.test/.well-known/jwks.json',
-    ALLOWED_KEY_IDS: '^(license|revocation)-signing-v2-[0-9]{4}-[0-9]{2}$',
+    ALLOWED_KEY_IDS: '^(license|revocation|regression-transition)-signing-v2-[0-9]{4}-[0-9]{2}$',
     AUDIT_LOG_PATH: auditPath,
     LICENSES_SLACK_WEBHOOK: '',
     LOG_LEVEL: 'error',
-    allowedKeyIdRegex: /^(license|revocation)-signing-v2-[0-9]{4}-[0-9]{2}$/,
+    allowedKeyIdRegex: /^(license|revocation|regression-transition)-signing-v2-[0-9]{4}-[0-9]{2}$/,
   };
 }
 
@@ -268,5 +268,68 @@ describe('signing flow', () => {
       }),
     });
     expect(res.status).toBe(200);
+  });
+
+  // ── P0-A S1（信任层5 transition authorization）：regression-transition purpose，mirror revocation ──
+
+  const REGR_KEY = 'regression-transition-signing-v2-2026-01';
+  const REGR_MANIFEST = {
+    schemaVersion: 1,
+    purpose: 'regression-transition',
+    baselineToolchainId: 'abi=1.0;core=1.0.13;validator=1;build=oldsha',
+    currentToolchainId: 'abi=1.0;core=1.0.14;validator=1;build=newsha',
+    policyId: 'pol-1',
+    approvedBy: 'user-approver',
+  };
+
+  it('regression-transition：full 2-人 ceremony approve+sign 通过（独立 key，无需 deploymentBinding）', async () => {
+    const subject = app();
+    const approve = await subject.app.request('/v1/approve', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-operator-jwt': 'operator' },
+      body: JSON.stringify({ purpose: 'regression-transition', keyId: REGR_KEY, payload: REGR_MANIFEST }),
+    });
+    expect(approve.status).toBe(200);
+    const approval = (await approve.json()) as { approvalToken: string };
+    const sign = await subject.app.request('/v1/sign', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-operator-jwt': 'operator',
+        'x-witness-jwt': 'witness',
+      },
+      body: JSON.stringify({
+        purpose: 'regression-transition', keyId: REGR_KEY, payload: REGR_MANIFEST,
+        approvalToken: approval.approvalToken,
+      }),
+    });
+    expect(sign.status).toBe(200);
+    const body = (await sign.json()) as { signature?: string; keyVersion?: string; canonicalPayload?: string };
+    expect(body.signature).toBeTruthy();
+    expect(body.canonicalPayload).toBeTruthy();
+  });
+
+  it('regression-transition：错 key 前缀（用 license key）→ 400 purpose-key-mismatch（密钥分离）', async () => {
+    const subject = app();
+    const res = await subject.app.request('/v1/approve', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-operator-jwt': 'operator' },
+      body: JSON.stringify({
+        purpose: 'regression-transition',
+        keyId: 'license-signing-v2-2026-01', // 错：应用 regression-transition-signing 前缀
+        payload: REGR_MANIFEST,
+      }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('regression-transition：反向——license purpose 用 regression-transition key → 400（密钥不可混用）', async () => {
+    const subject = app();
+    const res = await subject.app.request('/v1/approve', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-operator-jwt': 'operator' },
+      body: JSON.stringify({ purpose: 'license', keyId: REGR_KEY, payload: { schemaVersion: 2 } }),
+    });
+    expect(res.status).toBe(400);
   });
 });

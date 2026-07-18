@@ -25,7 +25,7 @@ config:
   # JWKS URL
   jwtJwksUrl: https://idp.aster.com/.well-known/jwks.json
   # 允许签名的 keyId 正则
-  allowedKeyIds: ^(license|revocation)-signing-v2-[0-9]{4}-[0-9]{2}$
+  allowedKeyIds: ^(license|revocation|regression-transition)-signing-v2-[0-9]{4}-[0-9]{2}$
   # 审计 JSONL 路径
   auditLogPath: /var/log/license-signing-api/audit.jsonl
   # pino 日志级别

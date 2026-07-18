@@ -4,9 +4,9 @@ import { z } from 'zod';
 import type { AppDeps, AppVariables } from '../index.js';
 import { AppError } from '../errors.js';
 import { base64url, canonicalStringify, sha256Hex } from '../canonical-json.js';
-import { assertKeyPurpose } from '../vault.js';
+import { assertKeyPurpose, type Purpose } from '../vault.js';
 
-const PurposeSchema = z.enum(['license', 'revocation']);
+const PurposeSchema = z.enum(['license', 'revocation', 'regression-transition']);
 
 const ApproveBodySchema = z.object({
   purpose: PurposeSchema,
@@ -34,7 +34,7 @@ const DeploymentBindingSchema = z.object({
  * surface for on-prem; revocation payloads have a different schema (no
  * binding) and are not affected.
  */
-function assertLicenseBinding(purpose: 'license' | 'revocation', payload: unknown): void {
+function assertLicenseBinding(purpose: Purpose, payload: unknown): void {
   if (purpose !== 'license') return;
   const binding = (payload as Record<string, unknown> | null)?.deploymentBinding;
   const parsed = DeploymentBindingSchema.safeParse(binding);
@@ -59,7 +59,7 @@ function parseLicenseId(purpose: string, payload: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
 }
 
-function validateKeyId(deps: AppDeps, purpose: 'license' | 'revocation', keyId: string): void {
+function validateKeyId(deps: AppDeps, purpose: Purpose, keyId: string): void {
   if (!deps.config.allowedKeyIdRegex.test(keyId)) {
     throw new AppError(400, 'key-not-allowed', 'keyId not allowed');
   }

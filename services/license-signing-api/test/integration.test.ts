@@ -111,6 +111,12 @@ describe.skipIf(SHOULD_SKIP)('license-signing-api integration', () => {
       exportable: false,
       allow_plaintext_backup: false,
     });
+    // P0-A S1：独立 Vault Transit key（密钥分离），签升级授权 manifest。
+    await vaultWrite('/v1/transit/keys/regression-transition-signing-v2-2026-01', {
+      type: 'ed25519',
+      exportable: false,
+      allow_plaintext_backup: false,
+    });
 
     const keyPair = generateKeyPairSync('rsa', { modulusLength: 2048 });
     privateKey = keyPair.privateKey;
@@ -154,11 +160,11 @@ describe.skipIf(SHOULD_SKIP)('license-signing-api integration', () => {
       JWT_ISSUER: issuer,
       JWT_AUDIENCE: audience,
       JWT_JWKS_URL: jwksUrl,
-      ALLOWED_KEY_IDS: '^(license|revocation)-signing-v2-[0-9]{4}-[0-9]{2}$',
+      ALLOWED_KEY_IDS: '^(license|revocation|regression-transition)-signing-v2-[0-9]{4}-[0-9]{2}$',
       AUDIT_LOG_PATH: join(dir, 'audit.jsonl'),
       LICENSES_SLACK_WEBHOOK: '',
       LOG_LEVEL: 'error',
-      allowedKeyIdRegex: /^(license|revocation)-signing-v2-[0-9]{4}-[0-9]{2}$/,
+      allowedKeyIdRegex: /^(license|revocation|regression-transition)-signing-v2-[0-9]{4}-[0-9]{2}$/,
       // VaultTransitClient.sign() calls this; without it the header becomes
       // literally "undefined" and Vault rejects with 403, manifesting as
       // vault-sign-failed. loadConfig() wires this up in prod from
@@ -251,6 +257,47 @@ describe.skipIf(SHOULD_SKIP)('license-signing-api integration', () => {
       deploymentId: 'a'.repeat(64),
       deploymentLabel: 'integration-test',
     });
+  }, 60_000);
+
+  it('P0-A S1：regression-transition manifest 经真 Vault Transit（独立 key）签名并验签通过', async () => {
+    const hono = app();
+    const KEY = 'regression-transition-signing-v2-2026-01';
+    // upgrade-manifest：无 deploymentBinding（binding 是 license-only），含 X→Y toolchain + 批准元数据。
+    const manifest = {
+      schemaVersion: 1,
+      purpose: 'regression-transition',
+      baselineToolchainId: 'abi=1.0;core=1.0.13;validator=1;build=oldsha',
+      currentToolchainId: 'abi=1.0;core=1.0.14;validator=1;build=newsha',
+      policyId: 'pol-it-1',
+      approvedBy: 'user-approver-it',
+    };
+    const operator = await jwt('operator-regr', 'license-operator');
+    const witness = await jwt('witness-regr', 'license-witness');
+
+    const approve = await hono.request('/v1/approve', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-operator-jwt': operator },
+      body: JSON.stringify({ purpose: 'regression-transition', keyId: KEY, payload: manifest }),
+    });
+    expect(approve.status).toBe(200);
+    const approval = (await approve.json()) as { approvalToken: string };
+
+    const sign = await hono.request('/v1/sign', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-operator-jwt': operator, 'x-witness-jwt': witness },
+      body: JSON.stringify({ purpose: 'regression-transition', keyId: KEY, payload: manifest, approvalToken: approval.approvalToken }),
+    });
+    expect(sign.status).toBe(200);
+    const signed = (await sign.json()) as { canonicalPayload: string; signature: string };
+    // ★用**独立 key**（regression-transition-signing）的公钥验签——密钥分离闭环。
+    const publicKey = await transitPublicKey(KEY);
+    expect(
+      verify(null, Buffer.from(signed.canonicalPayload, 'base64url'), publicKey, Buffer.from(signed.signature, 'base64url')),
+    ).toBe(true);
+    // manifest 字段穿过签名通道可解析（cloud verify 会读 baseline/current toolchainId）。
+    const canonical = JSON.parse(Buffer.from(signed.canonicalPayload, 'base64url').toString());
+    expect(canonical.baselineToolchainId).toBe(manifest.baselineToolchainId);
+    expect(canonical.currentToolchainId).toBe(manifest.currentToolchainId);
   }, 60_000);
 
   it('rejects replay', async () => {

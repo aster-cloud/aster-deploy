@@ -13,11 +13,20 @@ path "transit/sign/revocation-signing-*" {
   capabilities = ["update"]
 }
 
+# P0-A S1（信任层5 transition authorization）：独立 key 签名升级授权 manifest。
+path "transit/sign/regression-transition-signing-*" {
+  capabilities = ["update"]
+}
+
 path "transit/keys/license-signing-*" {
   capabilities = ["read"]
 }
 
 path "transit/keys/revocation-signing-*" {
+  capabilities = ["read"]
+}
+
+path "transit/keys/regression-transition-signing-*" {
   capabilities = ["read"]
 }
 
