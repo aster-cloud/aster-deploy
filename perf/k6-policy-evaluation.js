@@ -19,6 +19,16 @@
 import http from 'k6/http';
 import { check, sleep } from 'k6';
 import { Rate, Trend, Counter } from 'k6/metrics';
+import crypto from 'k6/crypto';
+
+// CSPRNG 版 [0,1) 随机数：取 4 字节 crypto.randomBytes → uint32 / 2^32。
+// 替代 Math.random()（CodeQL js/insecure-randomness）。此处纯生成负载测试数据，
+// 无安全含义，但用 CSPRNG 消除告警且不改变数据分布。
+function secureRandom() {
+  const b = new Uint8Array(crypto.randomBytes(4));
+  const u32 = (b[0] << 24) | (b[1] << 16) | (b[2] << 8) | b[3];
+  return (u32 >>> 0) / 4294967296;
+}
 
 const API_BASE = __ENV.API_BASE || 'http://localhost:8080';
 const API_KEY = __ENV.API_KEY;
@@ -63,14 +73,14 @@ export const options = {
 };
 
 export default function () {
-  const policyId = POLICY_IDS[Math.floor(Math.random() * POLICY_IDS.length)];
+  const policyId = POLICY_IDS[Math.floor(secureRandom() * POLICY_IDS.length)];
   const url = `${API_BASE}/api/v1/policies/${policyId}/execute`;
   const body = JSON.stringify({
     input: {
       // Generic input that satisfies most demo policies
-      amount: Math.floor(Math.random() * 100000),
-      age: 25 + Math.floor(Math.random() * 40),
-      credit_score: 600 + Math.floor(Math.random() * 200),
+      amount: Math.floor(secureRandom() * 100000),
+      age: 25 + Math.floor(secureRandom() * 40),
+      credit_score: 600 + Math.floor(secureRandom() * 200),
     },
   });
   const params = {
@@ -96,7 +106,7 @@ export default function () {
     evalSucceeded.add(1);
   }
 
-  sleep(Math.random() * 0.1);
+  sleep(secureRandom() * 0.1);
 }
 
 export function handleSummary(data) {
