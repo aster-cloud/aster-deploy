@@ -11,7 +11,7 @@
     "test:integration": "vitest run test/integration.test.ts"
   },
   "dependencies": {
-    "@hono/node-server": "^1.13.0",
+    "@hono/node-server": "^2.0.5",
     "dotenv": "^16.4.7",
     "hono": "^4.0.0",
     "jose": "^5.0.0",
