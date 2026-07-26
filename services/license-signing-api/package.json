@@ -25,7 +25,7 @@
     "testcontainers": "^11.9.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.0",
-    "vitest": "^2.1.8"
+    "vitest": "^3.2.6"
   },
   "engines": {
     "node": ">=24.0.0"
