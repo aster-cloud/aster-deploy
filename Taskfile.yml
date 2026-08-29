@@ -205,16 +205,67 @@ tasks:
   container:lsp:
     desc: 构建并推送 aster-lsp 容器镜像
     cmds:
-      - ./scripts/container-build-push.sh cloud wontlost/aster-lsp {{.LSP_IMAGE_TAG | default "0.0.9"}} --dockerfile Dockerfile.lsp
+      # ★不再默认可变 tag 0.0.9（issue #9）：生产 lsp Deployment 是
+      #   aster-lsp:0.0.9 + imagePullPolicy: IfNotPresent —— 往同一个 tag 反复推，
+      #   节点只要有缓存就**静默继续跑旧镜像**，rollout restart 也换不掉。
+      #   现在必须显式给一个不可变 tag；不给就报错，绝不再悄悄复用 0.0.9。
+      #   长期方向：由 aster-cloud CI 的 build-lsp-image job 推已签名的
+      #   :${{ github.sha }} 并纳入 k3s digest-pin（见 aster-deploy#9）。
+      - |
+        TAG="{{.LSP_IMAGE_TAG}}"
+        # ★同时拒绝「空」与「历史可变 tag 0.0.9」。
+        #   只判空是不够的：仓库 .env（gitignored）里长期写着 LSP_IMAGE_TAG=0.0.9，
+        #   守卫会被存量本地配置**静默绕过** —— 实测确认过。
+        if [ -z "$TAG" ] || [ "$TAG" = "0.0.9" ]; then
+          cat >&2 <<'MSG'
+        ✗ 必须显式指定 LSP_IMAGE_TAG，且必须是不可变 tag（不能是 0.0.9）。
+
+          为什么：生产 lsp 是 aster-lsp:0.0.9 + imagePullPolicy: IfNotPresent，
+          往同一 tag 重复推镜像时，有缓存的节点会**静默继续跑旧版本**，
+          rollout restart 也换不掉（issue #9）。
+
+          用法：task container:lsp LSP_IMAGE_TAG=$(git -C ../aster-cloud rev-parse HEAD)
+          （必须用 task 的 var 语法传；仓库有 dotenv: [.env]，前置环境变量会被 .env 覆盖）
+
+          若你的本地 .env 里有 `LSP_IMAGE_TAG=0.0.9`，请删掉那一行。
+        MSG
+          exit 1
+        fi
+      - ./scripts/container-build-push.sh cloud wontlost/aster-lsp {{.LSP_IMAGE_TAG}} --dockerfile Dockerfile.lsp
 
   # ╔══════════════════════════════════════════╗
   # ║            部署任务（release）             ║
   # ╚══════════════════════════════════════════╝
 
   deploy:api:
-    desc: 部署 aster-api 到 K3S
+    desc: "【已废弃】aster-api 现由 GitOps digest-pin 发布，本任务不再有效"
     cmds:
-      - ./scripts/deploy-k3s.sh api
+      # ★本任务已被 k3s 的统一镜像 digest-pin 架空（issue #8）。
+      #
+      #   生产 Deployment 由 k3s apps/aster-lang/cloud/kustomization.yaml 的
+      #   images transformer 渲染成 `image@sha256:<digest>`，**不是浮动 tag**。
+      #   所以「推 jvm-latest + rollout restart」这套动作：
+      #     - 推出去的 jvm-latest 没有任何东西会去拉；
+      #     - rollout restart 重建的 Pod 仍按同一个 digest 起，版本不变。
+      #   即：它会**看起来成功**却什么都没部署——比直接失败更危险。
+      #
+      #   正确路径：源仓 CI 构建+cosign 签名 → 开 image-pin PR 改 k3s image-lock
+      #   与 kustomization → verify-image-pin 验签 → auto-merge → ArgoCD sync。
+      - |
+        cat >&2 <<'MSG'
+        ✗ task deploy:api 已废弃，且**执行它不会部署任何东西**。
+
+          原因：aster-api 生产 Deployment 由 k3s digest-pin 渲染为
+                image@sha256:<digest>，浮动 tag jvm-latest 无人拉取，
+                rollout restart 只会用同一 digest 重建 Pod。
+
+          正确做法：走 aster-api 源仓 CI 的 image-pin PR 流程
+                （构建 → cosign 签名 → PR 改 k3s image-lock → verify → ArgoCD sync）。
+
+          若确需手工重启（仅排障，不换版本）：
+                kubectl -n aster-cloud rollout restart deployment/aster-api
+        MSG
+        exit 1
 
   deploy:lsp:
     desc: 部署 aster-lsp 到 K3S
