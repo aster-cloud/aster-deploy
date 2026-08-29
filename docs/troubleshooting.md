@@ -79,7 +79,23 @@ kubectl --kubeconfig ~/.kube/k3s-config get nodes
 
 ### ArgoCD 回滚部署
 
-`task deploy:api` 使用 `rollout restart`（而非 `set image`），与 ArgoCD 兼容。ArgoCD 会保持使用 `jvm-latest` 标签。
+★**此说法已过时，且方向相反**（issue #8）。
+
+aster-api 生产 Deployment 由 k3s `apps/aster-lang/cloud/kustomization.yaml` 的
+images transformer 渲染成 `image@sha256:<digest>`，**不是** `jvm-latest` 浮动 tag。
+因此：
+
+- 推 `jvm-latest` 没有任何东西会去拉它；
+- `rollout restart` 重建的 Pod 仍按同一个 digest 起，**版本不会变**。
+
+即旧流程会「看起来成功却什么都没部署」。`task deploy:api` 已因此废弃并改为直接报错。
+
+**发布 aster-api 的正确路径**：源仓 CI 构建 + cosign 签名 → 开 image-pin PR 改 k3s
+`image-lock.yaml` 与 `kustomization.yaml` → `verify-image-pin` 验签 → auto-merge →
+ArgoCD sync 按新 digest 部署。
+
+**回滚**：把 image-lock/kustomization 的 digest 改回上一个已验签值（同样走 PR），
+而不是重启 Pod。
 
 ### Cloudflare 部署失败
 
