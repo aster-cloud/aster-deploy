@@ -4,7 +4,30 @@
 #   仅基础设施: podman-compose up -d
 services:
   postgres:
-    image: docker.io/postgres:17-alpine
+    # ★大版本必须与生产一致（issue #10）。生产是 CNPG
+    #   ghcr.io/cloudnative-pg/postgresql:16.4（k3s 仓
+    #   apps/infrastructure/postgres-cluster/manifests/cluster.yaml:18，全仓唯一来源）。
+    #   此前本地是 17-alpine，跨大版本的 SQL/行为差异在本地测不出来。
+    #   ★改这行前先查生产实际版本——生产升级后本地才跟着升，不要反向。
+    #
+    # ★从 17 降到 16 需要**重建数据卷**：PG 拒绝在高版本 initdb 过的数据目录上启动。
+    #   实测错误：`FATAL: database files are incompatible with server` /
+    #   `The data directory was initialized by PostgreSQL version 17,
+    #    which is not compatible with this version 16.14.`
+    #
+    #   已有本地环境执行：
+    #       podman-compose down
+    #       podman volume ls | grep postgres-data     # ★先确认卷名再删
+    #       podman volume rm <上一步查到的卷名>
+    #
+    #   ★卷名不要写死：实测 podman-compose 5.1.4 用的是 **compose 文件所在目录**名
+    #   （得 `compose_postgres-data`），而 compose 规范说的是工作目录名
+    #   （应为 `aster-deploy_postgres-data`）。换 docker compose 或换版本可能不同，
+    #   故用 `volume ls | grep` 自己确认。
+    #
+    #   重建无数据损失：entrypoint 每次启动都会重跑 Drizzle schema 同步并重插种子
+    #   （种子 SQL 带 ON CONFLICT DO NOTHING，幂等）。
+    image: docker.io/postgres:16-alpine
     container_name: aster-postgres
     ports:
       - "${LOCAL_PG_PORT:-5432}:5432"
