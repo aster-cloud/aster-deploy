@@ -366,7 +366,7 @@ stage_api_e2e() {
   local pg_name="aster-e2e-pg-$$" redis_name="aster-e2e-redis-$$"
   "$CONTAINER_CLI" run -d --rm --name "$pg_name" \
     -e POSTGRES_DB=aster_e2e -e POSTGRES_USER=aster -e POSTGRES_PASSWORD=aster \
-    -p 15432:5432 postgres:17-alpine >/dev/null
+    -p 15432:5432 postgres:16-alpine >/dev/null
   "$CONTAINER_CLI" run -d --rm --name "$redis_name" \
     -p 16379:6379 redis:7-alpine >/dev/null
 

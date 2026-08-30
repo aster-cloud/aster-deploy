@@ -68,9 +68,18 @@ if ! run_cmd "${KUBECTL[@]}" rollout status "deployment/${DEPLOYMENT}" --timeout
   echo "── 当前状态 ─────────────────────────────────" >&2
   "${KUBECTL[@]}" get "deployment/${DEPLOYMENT}" -o wide 2>&1 | sed 's/^/  /' >&2 || true
   echo "" >&2
-  echo "── 未就绪的 Pod（最可能的原因在这里）──────────" >&2
-  "${KUBECTL[@]}" get pods -l "app=${DEPLOYMENT}" \
-    --field-selector=status.phase!=Running -o wide 2>&1 | sed 's/^/  /' >&2 || true
+  echo "── Pod 状态（看 READY 列，0/1 即未就绪）──────────" >&2
+  # ★不要用 `--field-selector=status.phase!=Running` 过滤（交叉审查实证）。
+  #   `status.phase` 与「就绪」是两个概念，readiness 不参与 phase 计算：
+  #     ImagePullBackOff / 排不下  → phase=Pending   ✅ 会被显示
+  #     CrashLoopBackOff           → phase=**Running** ❌ 被滤掉
+  #     readinessProbe 失败(0/1)   → phase=**Running** ❌ 被滤掉
+  #   而 rollout status 超时最常见的原因恰恰是后两者——新 Pod 起来了但没 ready。
+  #   加过滤会让这一段在真正需要它时打印「No resources found」，
+  #   标题却写着「最可能的原因在这里」，把排查方向引开。
+  #   实测（假 kubectl 模拟 CrashLoopBackOff）：加过滤 → 空表；去掉 → 正常列出。
+  #   列全部 Pod 即可，READY 列自己会显示 0/1。
+  "${KUBECTL[@]}" get pods -l "app=${DEPLOYMENT}" -o wide 2>&1 | sed 's/^/  /' >&2 || true
   echo "" >&2
   echo "── 最近事件 ─────────────────────────────────" >&2
   "${KUBECTL[@]}" get events --sort-by=.lastTimestamp 2>&1 | tail -15 | sed 's/^/  /' >&2 || true

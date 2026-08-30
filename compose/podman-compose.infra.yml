@@ -3,9 +3,12 @@
 # 用法: podman-compose -f compose/podman-compose.infra.yml up -d
 services:
   postgres:
-    # ★与生产（CNPG 16.4）及 podman-compose.yml 保持同一大版本（issue #10）。
-    #   两个 compose 文件的镜像必须同步改——改一个漏一个会让「用哪个文件起的环境」
-    #   决定你测到的是哪个大版本。
+    # ★与生产（CNPG 16.4）保持同一大版本（issue #10）。
+    #   ★本仓共 **3 处** 声明 postgres 镜像，必须同步改：
+    #     compose/podman-compose.yml、compose/podman-compose.infra.yml、
+    #     scripts/e2e-local.sh（裸 podman run，不走 compose——最易漏）
+    #   核对命令：grep -rn 'postgres:1[0-9]' --exclude-dir=.git .
+    #   改一个漏一个会让「用哪条路径起的环境」决定你测到的是哪个大版本。
     image: docker.io/postgres:16-alpine
     container_name: aster-postgres
     ports:
