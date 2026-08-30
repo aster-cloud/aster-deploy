@@ -3,15 +3,49 @@ kind: Ingress
 metadata:
   name: license-signing-api
   namespace: aster-license-signing
-  annotations:
-    # cert-manager 负责 TLS；实际 issuer 按集群替换
-    cert-manager.io/cluster-issuer: letsencrypt-prod
+    # ★issuer 与 host 必须**成对**设置——本模板默认**不签发证书**（issue #12）。
+    #
+    #   此前默认写的是 `cert-manager.io/cluster-issuer: letsencrypt-prod`，
+    #   而下面的 host 是 `.internal`。实测 `.internal` **没有 NS 记录**
+    #   （ICANN 2024 起保留作私有用途的 TLD），公共 CA 不可能为它签发——
+    #   照抄本文件直接 apply，cert-manager 会无限重试并永久失败。
+    #   更糟的是失败只出现在 CertificateRequest 的 events 里，
+    #   `kubectl get ingress` 看起来一切正常，属典型的**静默坏**。
+    #
+    #   本集群目前只定义了两个 ClusterIssuer（k3s 仓
+    #   apps/infrastructure/cert-manager/cluster-issuers.yaml）：
+    #   `letsencrypt-prod` 与 `letsencrypt-staging`，**没有** selfsigned/内部 CA。
+    #   故这里不能改指一个"更安全的默认 issuer"——它不存在，那只是把
+    #   一种坏换成另一种坏。
+    #
+    #   处理：默认**注释掉** issuer 注解。cert-manager 不接管 → 不产生
+    #   永久失败的 CertificateRequest；Ingress 以 HTTP 正常提供服务
+    #   （内网场景本就常见），需要 TLS 时按下面两种情形之一显式启用。
+    #
+    #   启用 TLS 的两种情形（issuer 与 host 必须同时改）：
+    #     · 公网 host：把下面两处 host 换成真实域名（如
+    #       license-signing.aster-lang.dev），并取消注释下面这行 →
+    #         cert-manager.io/cluster-issuer: letsencrypt-prod
+    #       首次建议先用 letsencrypt-staging 验证，避免撞生产速率限制
+    #       （每域名每周 50 张）。
+    #     · 内网 host：先在集群里建一个 selfsigned/内部 CA 的 ClusterIssuer，
+    #       再把它的名字填在这里。
+    #
+    #   与 deployment.yaml 的 `:latest` 同属「模板默认值，上线前需按环境定」
+    #   （见该文件 P1-R21 注释）；差别是镜像默认值只是不够精确，
+    #   而 issuer/host 不匹配是**必然失败**，故这里默认取"不启用"而非"必坏"。
+    # cert-manager.io/cluster-issuer: letsencrypt-prod
 spec:
   ingressClassName: traefik
-  tls:
-    - hosts:
-        - license-signing.aster-lang.internal
-      secretName: license-signing-api-tls
+  # ★tls 与上面的 issuer 注解**同进同出**。
+  #   保留 tls 但不配 issuer 时，secret `license-signing-api-tls` 永远不会被创建，
+  #   Traefik 回落到它自带的默认自签证书——浏览器报错、且看不出是配置没做完。
+  #   故默认一并注释掉；启用 TLS 时与上面的 issuer 注解一起取消注释，
+  #   并把两处 host 同步换成目标域名。
+  # tls:
+  #   - hosts:
+  #       - license-signing.aster-lang.internal
+  #     secretName: license-signing-api-tls
   rules:
     - host: license-signing.aster-lang.internal
       http:

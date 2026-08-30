@@ -51,6 +51,44 @@ log_info "重启 ${DEPLOYMENT} (${NAMESPACE})"
 run_cmd "${KUBECTL[@]}" rollout restart "deployment/${DEPLOYMENT}"
 
 log_info "等待滚动更新完成 ..."
-run_cmd "${KUBECTL[@]}" rollout status "deployment/${DEPLOYMENT}" --timeout=120s
+# ★rollout status 超时不能直接死掉（issue #11）。
+#
+#   此前 `set -e` 会让脚本在超时处静默退出：Deployment 卡在半滚状态
+#   （新 ReplicaSet 起不来、旧的已被缩容），而操作者手上没有任何恢复指引，
+#   得自己回想 `kubectl rollout undo` 的语法和 namespace。
+#
+#   ★这里**不自动 undo**：自动回滚会掩盖真实故障（镜像拉不动、探针失败、
+#   配额不足都会走到这），且在多人同时操作时可能回滚掉别人刚发的版本。
+#   合规决策系统上，"让人看着办但把信息给全" 比 "替人做决定" 更安全。
+#   故：打印诊断 + 现成可粘贴的回滚命令，然后以非零退出。
+if ! run_cmd "${KUBECTL[@]}" rollout status "deployment/${DEPLOYMENT}" --timeout=120s; then
+  log_error "${DEPLOYMENT} 滚动更新未在 120s 内完成——Deployment 可能停在半滚状态"
+
+  echo "" >&2
+  echo "── 当前状态 ─────────────────────────────────" >&2
+  "${KUBECTL[@]}" get "deployment/${DEPLOYMENT}" -o wide 2>&1 | sed 's/^/  /' >&2 || true
+  echo "" >&2
+  echo "── 未就绪的 Pod（最可能的原因在这里）──────────" >&2
+  "${KUBECTL[@]}" get pods -l "app=${DEPLOYMENT}" \
+    --field-selector=status.phase!=Running -o wide 2>&1 | sed 's/^/  /' >&2 || true
+  echo "" >&2
+  echo "── 最近事件 ─────────────────────────────────" >&2
+  "${KUBECTL[@]}" get events --sort-by=.lastTimestamp 2>&1 | tail -15 | sed 's/^/  /' >&2 || true
+
+  echo "" >&2
+  echo "── 恢复操作（按需选一条，均可直接粘贴）──────────" >&2
+  echo "  # 看某个 Pod 为什么起不来：" >&2
+  echo "  kubectl --kubeconfig ${KUBECONFIG_PATH} -n ${NAMESPACE} describe pod -l app=${DEPLOYMENT}" >&2
+  echo "  kubectl --kubeconfig ${KUBECONFIG_PATH} -n ${NAMESPACE} logs -l app=${DEPLOYMENT} --tail=100" >&2
+  echo "" >&2
+  echo "  # 回滚到上一个 revision：" >&2
+  echo "  kubectl --kubeconfig ${KUBECONFIG_PATH} -n ${NAMESPACE} rollout undo deployment/${DEPLOYMENT}" >&2
+  echo "" >&2
+  echo "  # 查看历史 revision（回滚到指定版本用 --to-revision=N）：" >&2
+  echo "  kubectl --kubeconfig ${KUBECONFIG_PATH} -n ${NAMESPACE} rollout history deployment/${DEPLOYMENT}" >&2
+  echo "" >&2
+
+  exit 1
+fi
 
 log_success "${DEPLOYMENT} 部署完成"
