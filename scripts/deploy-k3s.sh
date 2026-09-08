@@ -85,6 +85,12 @@ if ! run_cmd "${KUBECTL[@]}" rollout status "deployment/${DEPLOYMENT}" --timeout
   "${KUBECTL[@]}" get events --sort-by=.lastTimestamp 2>&1 | tail -15 | sed 's/^/  /' >&2 || true
 
   echo "" >&2
+  # ★把 revision 直接列出来（issue #18）：回滚命令要带 --to-revision=N 时，
+  #   操作者不该再跑一条命令才知道 N 是多少；半滚状态下时间就是可用性。
+  echo "── revision 历史（最后一行是本次 restart 产生的 revision）──" >&2
+  "${KUBECTL[@]}" rollout history "deployment/${DEPLOYMENT}" 2>&1 | sed 's/^/  /' >&2 || true
+
+  echo "" >&2
   echo "── 恢复操作（按需选一条，均可直接粘贴）──────────" >&2
   echo "  # 看某个 Pod 为什么起不来：" >&2
   echo "  kubectl --kubeconfig ${KUBECONFIG_PATH} -n ${NAMESPACE} describe pod -l app=${DEPLOYMENT}" >&2
