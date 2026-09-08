@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
-# K3S 部署脚本（rollout restart + status wait）
+# K3S 手工重启脚本（rollout restart + status wait）
 # 用法: ./scripts/deploy-k3s.sh <target>  (target: api|lsp)
+#
+# ★这只是排障用的重启，**不换版本**（issue #16）：api / lsp 的生产 Deployment
+#   都由 k3s 仓按 digest 固定，restart 重建的 Pod 仍按同一 digest 起。
+#   要发布新版本走 k3s 的 image-pin PR，见 docs/troubleshooting.md。
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
