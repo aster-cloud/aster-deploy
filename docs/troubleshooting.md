@@ -64,9 +64,12 @@ macOS 上 Podman 运行在 VM 中。容器间通信使用服务名（如 `postgr
 ```bash
 # 登录 Docker Hub
 podman login docker.io
-# 重试推送
-podman push wontlost/aster-api:jvm-latest
+# 重试推送（示例为 lsp；tag 必须是不可变 tag，见 Taskfile 的 container:lsp）
+podman push wontlost/aster-lsp:<git-sha>
 ```
+
+注意：推送成功**不等于**已部署。aster-api / aster-lsp 的生产 Deployment 都按
+digest 固定，见下一节。
 
 ## 部署问题
 
@@ -79,16 +82,18 @@ kubectl --kubeconfig ~/.kube/k3s-config get nodes
 
 ### ArgoCD 回滚部署
 
-★**此说法已过时，且方向相反**（issue #8）。
+★**此说法已过时，且方向相反**（issue #8 / #16）。
 
 aster-api 生产 Deployment 由 k3s `apps/aster-lang/cloud/kustomization.yaml` 的
-images transformer 渲染成 `image@sha256:<digest>`，**不是** `jvm-latest` 浮动 tag。
+images transformer 渲染成 `image@sha256:<digest>`，**不是** `jvm-latest` 浮动 tag；
+aster-lsp 同理（k3s `apps/aster-lang/lsp/kustomization.yaml`，k3s#519 起）。
 因此：
 
-- 推 `jvm-latest` 没有任何东西会去拉它；
+- 推 `jvm-latest`（或 lsp 的任何 tag）没有任何东西会去拉它；
 - `rollout restart` 重建的 Pod 仍按同一个 digest 起，**版本不会变**。
 
-即旧流程会「看起来成功却什么都没部署」。`task deploy:api` 已因此废弃并改为直接报错。
+即旧流程会「看起来成功却什么都没部署」。`task deploy:api` 与 `task deploy:lsp`
+已因此废弃并改为直接报错；`scripts/deploy-k3s.sh` 仅保留作排障用的手工重启工具。
 
 **发布 aster-api 的正确路径**：源仓 CI 构建 + cosign 签名 → 开 image-pin PR 改 k3s
 `image-lock.yaml` 与 `kustomization.yaml` → `verify-image-pin` 验签 → auto-merge →
