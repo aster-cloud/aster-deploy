@@ -118,7 +118,11 @@ tasks:
       - task: publish:npm
       - task: container:api
       - task: container:lsp
-      - task: deploy:api
+      # ★不再调用 deploy:api —— 它已随 k3s digest-pin 废弃且**主动 exit 1**，
+      #   留在这里会让整条 release 流水线必然中断在此处（审计实测）。
+      #   aster-api 现由 GitOps 发布：源仓 CI 构建+cosign 签名 → image-pin PR
+      #   改 k3s image-lock → verify-image-pin 验签 → auto-merge → ArgoCD sync。
+      #   容器镜像仍由上面的 container:api 推送，供该流程引用。
       - task: deploy:lsp
       - task: deploy:cloud
       - task: verify

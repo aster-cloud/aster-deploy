@@ -110,7 +110,7 @@ task verify:test
 | `task publish:jvm` | 发布 JVM 构件 |
 | `task publish:npm` | 发布 npm 包 |
 | `task container:api` | 构建推送 API 镜像 |
-| `task deploy:api` | 部署 API 到 K3S |
+| ~~`task deploy:api`~~ | **已废弃**（k3s digest-pin 接管，执行会 exit 1）；改走 image-pin PR 流程 |
 | `task deploy:cloud` | 部署 Cloud 到 Cloudflare |
 | `task verify` | 生产冒烟测试 |
 | `task verify:local` | 本地冒烟测试 |
@@ -125,7 +125,7 @@ task verify:test
 | 修改了 aster-lang-core 语法 | `task dev` |
 | 本地调试 aster-api | `task local:infra` + IntelliJ |
 | 全栈 E2E 测试（无认证） | `task local:test` |
-| 仅部署 API | `task build:api && task container:api && task deploy:api` |
+| 仅部署 API | `task build:api && task container:api`，然后走 image-pin PR 流程（见下） |
 | 完整发布 | `task release` |
 
 ## 环境配置
