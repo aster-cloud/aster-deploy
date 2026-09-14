@@ -1,0 +1,41 @@
+# Taskfile 任务图门禁
+#
+# 本仓此前**没有任何检查会读 Taskfile**（只有 cleanup-old-runs 与
+# license-signing-api 两个 workflow）。于是 release 流水线调用了一个
+# 主动 exit 1 的废弃任务，整条流水线必然中断，却无人发现——
+# 审计实测把 `- task: deploy:api` 加回 release，零检查变红。
+#
+# 本 workflow 补上这一层：任何人把废弃任务接回流水线都会被拦住。
+name: verify-task-graph
+
+on:
+  pull_request:
+    paths:
+      - 'Taskfile.yml'
+      - 'scripts/verify-task-graph.sh'
+      - '.github/workflows/verify-task-graph.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'Taskfile.yml'
+      - 'scripts/verify-task-graph.sh'
+      - '.github/workflows/verify-task-graph.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      # ★先跑反向自检再跑正式检查：自检会往临时副本里注入一条违规，
+      #   断言门禁**确实变红**。没有这一步，门禁一旦退化成恒绿
+      #   （解析器与 Taskfile 结构脱节、正则写错等），
+      #   正式检查的「✓ 通过」就是假绿，而且看不出来。
+      - name: 反向自检（门禁必须能变红）
+        run: ./scripts/verify-task-graph.sh --self-test
+
+      - name: 检查任务图
+        run: ./scripts/verify-task-graph.sh
