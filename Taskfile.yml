@@ -9,17 +9,14 @@ vars:
   COMPOSE_FILE: compose/podman-compose.yml
   INFRA_COMPOSE_FILE: compose/podman-compose.infra.yml
   TEST_COMPOSE_FILE: compose/podman-compose.test.yml
-  # 检测 Podman socket 路径（macOS 上 docker-compose 需要 DOCKER_HOST 指向 Podman）
-  PODMAN_SOCKET:
-    sh: |
-      if command -v podman >/dev/null 2>&1 && command -v podman-machine-default >/dev/null 2>&1 || podman machine inspect podman-machine --format '{{`{{.ConnectionInfo.PodmanSocket.Path}}`}}' 2>/dev/null; then
-        true
-      fi
+  # 检测 Podman socket 路径（macOS 上 docker-compose 需要 DOCKER_HOST 指向 Podman）。
+  # ★inspect 不传机器名：默认机器叫 podman-machine-default，写死 podman-machine 会
+  #   VM does not exist，DOCKER_HOST 永远为空（issue #32）。
   DOCKER_HOST_VAL:
     sh: |
       if [ -n "${DOCKER_HOST:-}" ]; then echo "$DOCKER_HOST";
       elif command -v podman >/dev/null 2>&1; then
-        sock="$(podman machine inspect podman-machine --format '{{`{{.ConnectionInfo.PodmanSocket.Path}}`}}' 2>/dev/null || true)"
+        sock="$(podman machine inspect --format '{{`{{.ConnectionInfo.PodmanSocket.Path}}`}}' 2>/dev/null || true)"
         if [ -n "$sock" ] && [ -e "$sock" ]; then echo "unix://$sock";
         else echo ""; fi
       else echo ""; fi
