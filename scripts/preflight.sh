@@ -127,6 +127,13 @@ if [ "$MODE" = "release" ]; then
   check_env DOCKERHUB_TOKEN "Docker Hub Token"
   check_env CLOUDFLARE_API_TOKEN "Cloudflare API Token"
   check_env KUBECONFIG "KUBECONFIG"
+  # release 在 publish 之后才会走到 container:lsp，tag 不合法就已经产生不可逆发布了，
+  # 所以必须在这里前置校验（issue #29）
+  if "${SCRIPT_DIR}/check-lsp-tag.sh" "${LSP_IMAGE_TAG:-}"; then
+    log_success "LSP_IMAGE_TAG 已设置（${LSP_IMAGE_TAG}）"
+  else
+    ERRORS=$((ERRORS + 1))
+  fi
   if [ -n "${KUBECONFIG:-}" ]; then
     kubeconfig_path="$(expand_tilde "$KUBECONFIG")"
     if [ -f "$kubeconfig_path" ]; then

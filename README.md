@@ -31,7 +31,7 @@ task preflight
 # 3. 选择模式
 task local:infra   # 调试（最常用）
 task dev           # 构建
-task release       # 发布 + 部署
+task release LSP_IMAGE_TAG=$(git -C ../aster-cloud rev-parse HEAD)   # 发布 + 部署（必须带不可变 lsp tag）
 ```
 
 ## 本地调试（最常用工作流）
@@ -101,7 +101,7 @@ task verify:test
 | `task local:logs` | 查看容器日志 |
 | `task local:clean` | 删除容器和数据卷 |
 | `task dev` | 构建全部项目 |
-| `task release` | 完整发布流水线 |
+| `task release LSP_IMAGE_TAG=<sha>` | 完整发布流水线（预检阶段即校验 LSP_IMAGE_TAG） |
 | `task build:core` | 构建 aster-lang-core |
 | `task build:packs` | 构建语言包（并行） |
 | `task build:ts` | 构建 aster-lang-ts |
@@ -126,7 +126,7 @@ task verify:test
 | 本地调试 aster-api | `task local:infra` + IntelliJ |
 | 全栈 E2E 测试（无认证） | `task local:test` |
 | 仅部署 API | `task build:api && task container:api`，然后走 image-pin PR 流程（见下） |
-| 完整发布 | `task release` |
+| 完整发布 | `task release LSP_IMAGE_TAG=<sha>` |
 
 ## 环境配置
 
