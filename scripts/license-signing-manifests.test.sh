@@ -78,6 +78,24 @@ if ing2["metadata"]["annotations"].get("cert-manager.io/cluster-issuer") != "let
 
 cidrs = [t["ipBlock"]["cidr"] for r in by_kind(load(cidrlist_f), "NetworkPolicy")["spec"]["egress"]
          for t in r.get("to", []) if "ipBlock" in t]
+# except 必须是所属 cidr 的子网，否则 apiserver 拒绝该 NetworkPolicy
+import ipaddress
+def check_subset(label, docs):
+    for r in by_kind(docs, "NetworkPolicy")["spec"]["egress"]:
+        for t in r.get("to", []):
+            blk = t.get("ipBlock")
+            if not blk:
+                continue
+            net = ipaddress.ip_network(blk["cidr"])
+            for e in blk.get("except", []):
+                if not ipaddress.ip_network(e).subnet_of(net):
+                    errors.append(f"[{label}] except {e} 不是 cidr {blk['cidr']} 的子网")
+check_subset("kustomize", sets["kustomize"])
+check_subset("helm-default", sets["helm"])
+check_subset("helm-cidrlist", load(cidrlist_f))
+for t in [t for r in by_kind(load(cidrlist_f), "NetworkPolicy")["spec"]["egress"] for t in r.get("to", []) if "ipBlock" in t]:
+    if t["ipBlock"].get("except"):
+        errors.append(f"[helm] 白名单网段 {t['ipBlock']['cidr']} 不应带 except")
 if cidrs != ["198.51.100.0/24", "203.0.113.0/24"]:
     errors.append(f"[helm] publicEgress.cidr 列表写法未渲染为多条 ipBlock: {cidrs}")
 

@@ -77,7 +77,7 @@ networkPolicy:
   vaultPort: 8200
   # IdP JWKS / Slack 的公网 443 出站；原生 NetworkPolicy 不支持 FQDN，
   # 故默认放行公网并排除私有/链路本地/CGNAT 网段。
-  # cidr 可写单值或列表；生产建议收紧为 IdP / Slack 出口 IP 白名单（此时 except 通常可清空），
+  # cidr 可写单值或列表；生产建议收紧为 IdP / Slack 出口 IP 白名单（except 只会附加在 0.0.0.0/0 上，白名单网段自动不带 except），
   # 或用 egress proxy 并把 jwtJwksUrl 指向它。
   publicEgress:
     cidr: 0.0.0.0/0

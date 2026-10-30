@@ -33,5 +33,18 @@ check "display_name（token）被拒绝" "1" "$(is_entity_id token; echo $?)"
 check "空串被拒绝" "1" "$(is_entity_id ''; echo $?)"
 check "null 被拒绝" "1" "$(is_entity_id null; echo $?)"
 
+# --approve 路径确实调用 UUID 检查：假 vault 返回 display_name 形式的旧 approval，必须被拒绝
+TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+mkdir -p "$TMP/bin"
+cat > "$TMP/bin/vault" <<'FAKE'
+#!/usr/bin/env bash
+echo '{"data":{"data":{"payload":"{\"x\":1}","operator":"token","operatorSession":"s","keyFingerprint":"f"}}}'
+FAKE
+chmod +x "$TMP/bin/vault"
+approve_out="$(PATH="$TMP/bin:$PATH" VAULT_ADDR=http://127.0.0.1:1 VAULT_TOKEN_OPERATOR=a VAULT_TOKEN_WITNESS=b \
+  bash "$SCRIPT_DIR/license-issue.sh" --approve "$(printf 'a%.0s' $(seq 1 64))" 2>&1)"; approve_rc=$?
+check "--approve 拒绝旧版 approval（退出码非零）" "1" "$([ "$approve_rc" -ne 0 ] && echo 1 || echo 0)"
+check "--approve 拒绝原因为 operator 非 entity_id" "1" "$(printf '%s' "$approve_out" | grep -q '旧版脚本' && echo 1 || echo 0)"
+
 [ "$FAILURES" -eq 0 ] || { echo "vault-identity 测试失败: $FAILURES 项" >&2; exit 1; }
 echo "✓ vault-identity.sh 全部通过"

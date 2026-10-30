@@ -46,7 +46,8 @@ spec:
         {{- range (kindIs "slice" .Values.networkPolicy.publicEgress.cidr | ternary .Values.networkPolicy.publicEgress.cidr (list .Values.networkPolicy.publicEgress.cidr)) }}
         - ipBlock:
             cidr: {{ . | quote }}
-            {{- with $.Values.networkPolicy.publicEgress.except }}
+            {{- /* except 必须是 cidr 的子集：只有 cidr 为全网（0.0.0.0/0）时才附带，白名单网段不带 */}}
+            {{- with (eq . "0.0.0.0/0" | ternary $.Values.networkPolicy.publicEgress.except nil) }}
             except:
               {{- toYaml . | nindent 14 }}
             {{- end }}
