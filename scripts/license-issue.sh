@@ -541,6 +541,8 @@ if [ -n "$APPROVE_TOKEN" ]; then
   operator_session="$(printf '%s' "$pending" | jq -r '.data.data.operatorSession // .data.operatorSession')"
   stored_fingerprint="$(printf '%s' "$pending" | jq -r '.data.data.keyFingerprint // .data.keyFingerprint')"
   [ -n "$payload" ] && [ "$payload" != "null" ] || die "approval token 不存在或已失效"
+  is_entity_id "$operator" \
+    || die "该 approval 由旧版脚本（按 display_name 判身份）创建，operator 不是 entity_id，无法校验两人分离；请删除后由 Operator 重新发起"
 
   # codex Major-3: 防 approval 伪造 —— 重新计算 sha256(payload+session) 必须等于 token
   recomputed_token="$(

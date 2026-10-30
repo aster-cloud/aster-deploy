@@ -24,15 +24,16 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 helm_template > "$TMP/default.yaml"
 helm_template --set ingress.clusterIssuer=letsencrypt-prod > "$TMP/issuer.yaml"
+helm_template --set "networkPolicy.publicEgress.cidr={198.51.100.0/24,203.0.113.0/24}" > "$TMP/cidrlist.yaml"
 
-python3 -I - "$SVC/k8s" "$TMP/default.yaml" "$TMP/issuer.yaml" <<'PY'
+python3 -I - "$SVC/k8s" "$TMP/default.yaml" "$TMP/issuer.yaml" "$TMP/cidrlist.yaml" <<'PY'
 import sys, pathlib
 try:
     import yaml
 except ImportError:
     sys.exit("缺少 PyYAML（pip install pyyaml）")
 
-k8s, default_f, issuer_f = (pathlib.Path(p) for p in sys.argv[1:4])
+k8s, default_f, issuer_f, cidrlist_f = (pathlib.Path(p) for p in sys.argv[1:5])
 errors = []
 
 def load(path):
@@ -58,6 +59,12 @@ for name, docs in sets.items():
             and any(p.get("port") == 443 for p in r.get("ports", []))]
     if not jwks:
         errors.append(f"[{name}] NetworkPolicy 缺少到 IdP JWKS 的公网 443 出站（ipBlock）")
+    for r in jwks:
+        for t in r["to"]:
+            ex = set(t.get("ipBlock", {}).get("except", []))
+            missing = {"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "100.64.0.0/10"} - ex
+            if missing:
+                errors.append(f"[{name}] 公网出站 except 缺少 {sorted(missing)}")
     if any(t.get("namespaceSelector", {}).get("matchLabels", {}).get("kubernetes.io/metadata.name") == "cloudflare-tunnel"
            for r in egress for t in r.get("to", [])):
         errors.append(f"[{name}] 不应再把 cloudflare-tunnel（入站隧道）当作出站代理")
@@ -68,6 +75,11 @@ if "cert-manager.io/cluster-issuer" in (ing["metadata"].get("annotations") or {}
 ing2 = by_kind(load(issuer_f), "Ingress")
 if ing2["metadata"]["annotations"].get("cert-manager.io/cluster-issuer") != "letsencrypt-prod" or not ing2["spec"].get("tls"):
     errors.append("[helm] 显式设置 ingress.clusterIssuer 后必须同时渲染注解与 tls 段")
+
+cidrs = [t["ipBlock"]["cidr"] for r in by_kind(load(cidrlist_f), "NetworkPolicy")["spec"]["egress"]
+         for t in r.get("to", []) if "ipBlock" in t]
+if cidrs != ["198.51.100.0/24", "203.0.113.0/24"]:
+    errors.append(f"[helm] publicEgress.cidr 列表写法未渲染为多条 ipBlock: {cidrs}")
 
 if errors:
     print("\n".join(f"✗ {e}" for e in errors), file=sys.stderr)

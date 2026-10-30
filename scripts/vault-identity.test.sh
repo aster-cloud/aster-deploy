@@ -27,5 +27,11 @@ for body in \
   check "无 entity_id 时拒绝并无输出: ${body:0:40}" "1|" "$([ "$rc" -ne 0 ] && echo 1 || echo 0)|$out"
 done
 
+# 升级前遗留的在途 approval：operator 是 display_name，不是 entity_id UUID
+check "UUID 形式的 entity_id 通过" "0" "$(is_entity_id 3f2a9c1d-0b7e-4c55-9a1e-6d2b8f4e7a10; echo $?)"
+check "display_name（token）被拒绝" "1" "$(is_entity_id token; echo $?)"
+check "空串被拒绝" "1" "$(is_entity_id ''; echo $?)"
+check "null 被拒绝" "1" "$(is_entity_id null; echo $?)"
+
 [ "$FAILURES" -eq 0 ] || { echo "vault-identity 测试失败: $FAILURES 项" >&2; exit 1; }
 echo "✓ vault-identity.sh 全部通过"
