@@ -10,9 +10,10 @@ scrape_configs:
   - job_name: 'aster-api'
     metrics_path: /q/metrics
     static_configs:
-      # host.containers.internal 让容器访问 host loopback
-      # aster-api 跑在 host 8090（避开 chrono-synth-web 占用的 8080）
-      - targets: ['host.containers.internal:8090']
+      # 本覆盖层与 podman-compose.yml --profile full 叠加使用，aster-api 以容器 `api`
+      # 运行在 compose 网络内的 8080。若改在宿主机 IDE 里跑 aster-api，请把这里
+      # 临时改成 host.containers.internal:<宿主机端口>。
+      - targets: ['api:8080']
         labels:
           service: aster-api
 
