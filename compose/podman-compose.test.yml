@@ -2,10 +2,6 @@
 # 用法: podman-compose -f podman-compose.yml -f podman-compose.test.yml --profile full up -d
 # 功能: 禁用安全控制 + 种子测试用户（email+password 登录）
 services:
-  postgres:
-    volumes:
-      - ./init-db:/docker-entrypoint-initdb.d:ro
-
   api:
     environment:
       # 禁用安全控制，允许 curl/Postman 直接测试

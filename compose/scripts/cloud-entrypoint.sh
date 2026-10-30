@@ -3,9 +3,10 @@
 # 1. 安装 psql（用于执行种子 SQL）
 # 2. 安装依赖
 # 3. 等待 Postgres 就绪
-# 4. 同步 Drizzle schema
-# 5. 插入种子用户
-# 6. 启动 Next.js dev server
+# 4. 确保 aster_cloud 数据库存在
+# 5. 同步 Drizzle schema
+# 6. 插入种子用户
+# 7. 启动 Next.js dev server
 set -e
 
 echo "[cloud-entrypoint] 安装 postgresql-client ..."
@@ -31,6 +32,9 @@ echo "[cloud-entrypoint] 等待 Postgres 就绪 ..."
 until pg_isready -h postgres -p 5432 -U postgres >/dev/null 2>&1; do
   sleep 1
 done
+
+echo "[cloud-entrypoint] 确保 aster_cloud 数据库存在（不依赖 initdb.d，已初始化的数据卷也适用）..."
+PGPASSWORD=postgres sh /scripts/ensure-database.sh postgres aster_cloud
 
 echo "[cloud-entrypoint] 同步 Drizzle schema（drizzle-kit push）..."
 npx drizzle-kit push --force

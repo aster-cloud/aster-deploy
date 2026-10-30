@@ -5,12 +5,14 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/log.sh"
+source "${SCRIPT_DIR}/path.sh"
 source "${SCRIPT_DIR}/resolve-dir.sh"
 
 MODE="${1:-dev}"
 ERRORS=0
 
 check_cmd() {
+  # shellcheck disable=SC2034  # min_version 为历史保留的调用约定（调用方仍传第二个参数）
   local cmd="$1" min_version="${2:-}" label="${3:-$1}"
   if command -v "$cmd" >/dev/null 2>&1; then
     local version
@@ -126,6 +128,22 @@ if [ "$MODE" = "release" ]; then
   check_env DOCKERHUB_TOKEN "Docker Hub Token"
   check_env CLOUDFLARE_API_TOKEN "Cloudflare API Token"
   check_env KUBECONFIG "KUBECONFIG"
+  # release 在 publish 之后才会走到 container:lsp，tag 不合法就已经产生不可逆发布了，
+  # 所以必须在这里前置校验（issue #29）
+  if "${SCRIPT_DIR}/check-lsp-tag.sh" "${LSP_IMAGE_TAG:-}"; then
+    log_success "LSP_IMAGE_TAG 已设置（${LSP_IMAGE_TAG}）"
+  else
+    ERRORS=$((ERRORS + 1))
+  fi
+  if [ -n "${KUBECONFIG:-}" ]; then
+    kubeconfig_path="$(expand_tilde "$KUBECONFIG")"
+    if [ -f "$kubeconfig_path" ]; then
+      log_success "KUBECONFIG 文件存在（${kubeconfig_path}）"
+    else
+      log_error "KUBECONFIG 指向的文件不存在: ${kubeconfig_path}"
+      ERRORS=$((ERRORS + 1))
+    fi
+  fi
 fi
 
 echo ""

@@ -41,11 +41,18 @@ spec:
       ports:
         - protocol: TCP
           port: 8200
-    # JWKS / Slack 外联建议经 egress gateway 或 Cloudflare Tunnel；原生 NetworkPolicy 不支持 FQDN
+    # IdP JWKS（createRemoteJWKSet）与 Slack webhook 的公网出站（issue #28）。
+    #   cloudflared 是入站隧道，不是出站代理，向它的 Pod 发 443 到不了公网；
+    #   原生 NetworkPolicy 不支持 FQDN，故放行公网 443 并排除私有网段（集群内部流量仍受上面的规则约束）。
     - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: cloudflare-tunnel
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+              - 169.254.0.0/16 # 链路本地 / 云元数据
+              - 100.64.0.0/10 # CGNAT（Tailscale 等）
       ports:
         - protocol: TCP
           port: 443

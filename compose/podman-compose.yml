@@ -106,11 +106,18 @@ services:
     image: docker.io/node:24-alpine
     container_name: aster-lsp
     working_dir: /app
-    command: sh -c "node dist/lsp-server.mjs"
+    # ★入口是 aster-cloud 仓库根目录的 lsp-server.mjs（Dockerfile.lsp 同），没有 dist/（issue #26）。
+    #   依赖（ws / aster-lang-ts）由 cloud 容器装进共享的 cloud-node-modules 卷，
+    #   这里等它装好再启动，避免读到宿主机 node_modules 里不兼容的原生产物。
+    command: sh -c "until [ -d node_modules/ws ]; do sleep 2; done; exec node lsp-server.mjs"
     ports:
       - "${LOCAL_LSP_PORT:-3001}:3001"
+    environment:
+      # lsp-server 的 Origin 白名单默认不含 localhost（fail-closed），本地页面需显式放行
+      ALLOWED_ORIGINS: http://localhost:${LOCAL_CLOUD_PORT:-3000}
     volumes:
       - ${ASTER_CLOUD_DIR:-${ASTER_REPOS_DIR}/aster-cloud}:/app
+      - cloud-node-modules:/app/node_modules
     profiles: ["full"]
 
 volumes:

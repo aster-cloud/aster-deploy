@@ -502,3 +502,15 @@ vault delete transit/keys/license-signing-v2-2026-01
 2. Unseal backup Vault（最少 quorum 人数）
 3. 用 backup key 走第 7 节 ACL 流程发布新 trust bundle
 4. 主 Vault 取证完成后才允许重建
+
+## 迁移说明：`license-issue.sh` 改按 entity_id 判定 Operator / Witness（aster-deploy#34）
+
+旧版脚本用 `display_name` 作为身份写入 `secret/audit/license-approvals/<token>` 的 `operator` 字段。
+新版按 Vault `entity_id`（UUID）判定，并要求两个 token 都来自带 entity 的认证方式（OIDC / userpass / LDAP）。
+
+升级前后的在途请求**不能混用**：旧 approval 的 `operator` 是 display_name，与新版 Witness 的 entity_id 永不相等，
+会让同一人审批自己发起的请求。因此 `--approve` 会拒绝 `operator` 不是 UUID 的 approval。升级时：
+
+1. 升级前尽量先把在途 approval 审批完；
+2. 升级后若仍有遗留，列出并删除 `secret/audit/license-approvals/` 下的条目（`vault kv list` / `vault kv metadata delete`），
+   由 Operator 用新版脚本重新发起。

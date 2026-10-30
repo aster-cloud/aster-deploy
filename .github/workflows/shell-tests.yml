@@ -1,0 +1,53 @@
+# scripts/*.test.sh 离线回归测试 + shellcheck
+#
+# 这些脚本守的是「只在容器/集群里才暴露」的部署缺陷（stage 失败被吞、清理泄漏、
+# compose 配置错误、清单多副本等）。此前没有任何 workflow 运行它们。
+name: shell-tests
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/**'
+      - 'compose/**'
+      - 'services/license-signing-api/k8s/**'
+      - 'services/license-signing-api/helm/**'
+      - 'Taskfile.yml'
+      - '.github/workflows/shell-tests.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/**'
+      - 'compose/**'
+      - 'services/license-signing-api/k8s/**'
+      - 'services/license-signing-api/helm/**'
+      - 'Taskfile.yml'
+      - '.github/workflows/shell-tests.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - uses: arduino/setup-task@24c5e13bce349197642746563945fcdf9355e8f4 # v2.0.0
+        with:
+          version: 3.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 安装 PyYAML
+        run: python3 -m pip install --user pyyaml
+
+      - name: shellcheck
+        run: shellcheck -S warning scripts/*.sh compose/scripts/*.sh
+
+      - name: 运行 scripts/*.test.sh
+        run: |
+          set -e
+          for t in scripts/*.test.sh; do
+            echo "::group::$t"
+            bash "$t"
+            echo "::endgroup::"
+          done

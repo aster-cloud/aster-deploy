@@ -216,6 +216,11 @@ aster-ent-v2-<keyId>-<base64url(payload)>.<base64url(sig)>
 - service container 不挂载 Docker socket，不运行 root。
 - `VAULT_TOKEN` 使用 Vault Agent 注入短 TTL renewable token。
 - `/var/log/license-signing-api/audit.jsonl` 挂载到持久卷，并由日志管道归档。
+- **只能单副本**（`replicas: 1` + `strategy: Recreate`）：两步审批状态（approval / replay / 限流）都在进程内存里，
+  多副本会让 `/v1/approve` 与 `/v1/sign` 落到不同 Pod 而 404、防重放失效，审计卷（RWO）也无法被多 Pod 挂载。
+  要做多副本，先把 ApprovalStore / ReplayCache 落到共享存储（如 Vault KV），审计日志改为每 Pod 独立路径。
+- NetworkPolicy 放行到公网 443 的出站（排除私有网段），用于访问 IdP 的 JWKS 与 Slack webhook；
+  JWKS 不可达时所有 JWT 校验都会返回 401 auth-failed。
 
 Kubernetes 示例：
 
@@ -225,7 +230,10 @@ kind: Deployment
 metadata:
   name: license-signing-api
 spec:
-  replicas: 2
+  # 必须单副本 + Recreate：approval / replay / 限流在进程内存，审计卷为 RWO
+  replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: license-signing-api

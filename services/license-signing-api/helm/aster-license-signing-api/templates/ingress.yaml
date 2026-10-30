@@ -4,14 +4,18 @@ kind: Ingress
 metadata:
   name: {{ include "aster-license-signing-api.fullname" . }}
   namespace: {{ .Release.Namespace }}
+  {{- if .Values.ingress.clusterIssuer }}
   annotations:
     cert-manager.io/cluster-issuer: {{ .Values.ingress.clusterIssuer | quote }}
+  {{- end }}
 spec:
   ingressClassName: {{ .Values.ingress.className | quote }}
+  {{- if .Values.ingress.clusterIssuer }}
   tls:
     - hosts:
         - {{ .Values.ingress.host | quote }}
       secretName: {{ include "aster-license-signing-api.fullname" . }}-tls
+  {{- end }}
   rules:
     - host: {{ .Values.ingress.host | quote }}
       http:

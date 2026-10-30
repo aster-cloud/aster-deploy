@@ -6,7 +6,12 @@ metadata:
   labels:
     app.kubernetes.io/name: license-signing-api
 spec:
-  replicas: 2
+  # ★必须单副本（issue #23）：approval / replay / 限流都在进程内存里，两步审批的
+  #   /approve 与 /sign 落到不同 Pod 会 404、防重放也只对同一 Pod 生效；
+  #   审计 PVC 是 RWO，多副本还会 Multi-Attach。改多副本前须先把这些状态落到共享存储。
+  replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app.kubernetes.io/name: license-signing-api

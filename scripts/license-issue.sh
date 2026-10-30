@@ -8,6 +8,9 @@
 #      --approve <token>，脚本读取 approval、调用 transit sign（仅 Witness token 有 sign 权）、
 #      写入审计、删除 approval。
 #
+# 前置：两个 token 都必须来自带 entity 的认证方式（OIDC / userpass / LDAP），
+# 身份分离校验按 entity_id 判定；纯 token / root 没有 entity，会被拒绝。
+#
 # 用法:
 #   VAULT_TOKEN_OPERATOR=... scripts/license-issue.sh \
 #     --customer "Acme Corp" --tier enterprise --seats 500 \
@@ -19,6 +22,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=./log.sh
 source "${SCRIPT_DIR}/log.sh"
+# shellcheck source=./vault-identity.sh
+source "${SCRIPT_DIR}/vault-identity.sh"
 
 ALLOWED_FEATURES="sso audit-export custom-domain lsp-cluster byok-keys"
 REVOCATION_CHECK_URL="https://license.aster-lang.cloud/revoked.json"
@@ -175,13 +180,11 @@ NODE
 # -----------------------------------------------------------------------------
 
 operator_identity() {
-  VAULT_TOKEN="$VAULT_TOKEN_OPERATOR" vault token lookup -format=json \
-    | jq -r '.data.display_name // .data.entity_id // .data.id'
+  VAULT_TOKEN="$VAULT_TOKEN_OPERATOR" vault token lookup -format=json | vault_identity_from_lookup
 }
 
 witness_identity() {
-  VAULT_TOKEN="$VAULT_TOKEN_WITNESS" vault token lookup -format=json \
-    | jq -r '.data.display_name // .data.entity_id // .data.id'
+  VAULT_TOKEN="$VAULT_TOKEN_WITNESS" vault token lookup -format=json | vault_identity_from_lookup
 }
 
 latest_active_key_id() {
@@ -538,6 +541,8 @@ if [ -n "$APPROVE_TOKEN" ]; then
   operator_session="$(printf '%s' "$pending" | jq -r '.data.data.operatorSession // .data.operatorSession')"
   stored_fingerprint="$(printf '%s' "$pending" | jq -r '.data.data.keyFingerprint // .data.keyFingerprint')"
   [ -n "$payload" ] && [ "$payload" != "null" ] || die "approval token 不存在或已失效"
+  is_entity_id "$operator" \
+    || die "该 approval 由旧版脚本（按 display_name 判身份）创建，operator 不是 entity_id，无法校验两人分离；请删除后由 Operator 重新发起"
 
   # codex Major-3: 防 approval 伪造 —— 重新计算 sha256(payload+session) 必须等于 token
   recomputed_token="$(
@@ -550,7 +555,7 @@ if [ -n "$APPROVE_TOKEN" ]; then
 
   print_payload_preview "$payload"
 
-  witness="$(witness_identity)"
+  witness="$(witness_identity)" || die "无法确定 Witness 的 Vault identity"
   [ -n "$witness" ] && [ "$witness" != "null" ] || die "Witness token lookup 失败"
   [ "$witness" != "$operator" ] || die "Witness 不能与 Operator 是同一 Vault identity"
 
@@ -609,7 +614,7 @@ license_id="$(generate_ulid)"
 feature_array="$(features_json)"
 payload="$(build_payload "$license_id" "$KEY_ID" "$issued_at" "$expires_at" "$not_before" "$feature_array")"
 fingerprint="$(key_fingerprint "$KEY_ID")"
-operator="$(operator_identity)"
+operator="$(operator_identity)" || die "无法确定 Operator 的 Vault identity"
 
 print_payload_preview "$payload"
 echo "Key ID: ${KEY_ID}"

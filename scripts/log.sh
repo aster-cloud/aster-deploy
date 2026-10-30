@@ -5,6 +5,7 @@ COLOR_INFO="\033[1;34m"
 COLOR_WARN="\033[1;33m"
 COLOR_ERROR="\033[1;31m"
 COLOR_SUCCESS="\033[1;32m"
+# shellcheck disable=SC2034  # 由 e2e-local.sh 等 source 本文件的脚本使用
 COLOR_DIM="\033[0;90m"
 COLOR_RESET="\033[0m"
 

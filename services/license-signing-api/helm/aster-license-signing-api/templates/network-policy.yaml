@@ -40,10 +40,18 @@ spec:
       ports:
         - protocol: TCP
           port: {{ .Values.networkPolicy.vaultPort }}
+    # IdP JWKS 与 Slack webhook 的公网出站；cloudflared 是入站隧道，不能当出站代理
     - to:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: {{ .Values.networkPolicy.egressNamespace | quote }}
+        {{- /* cidr 兼容旧版单值写法，也可写成列表（生产可收紧为 IdP/Slack 出口白名单） */}}
+        {{- range (kindIs "slice" .Values.networkPolicy.publicEgress.cidr | ternary .Values.networkPolicy.publicEgress.cidr (list .Values.networkPolicy.publicEgress.cidr)) }}
+        - ipBlock:
+            cidr: {{ . | quote }}
+            {{- /* except 必须是 cidr 的子集：只有 cidr 为全网（0.0.0.0/0）时才附带，白名单网段不带 */}}
+            {{- with (eq . "0.0.0.0/0" | ternary $.Values.networkPolicy.publicEgress.except nil) }}
+            except:
+              {{- toYaml . | nindent 14 }}
+            {{- end }}
+        {{- end }}
       ports:
         - protocol: TCP
           port: 443
