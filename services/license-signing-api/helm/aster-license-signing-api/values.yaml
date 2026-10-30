@@ -1,5 +1,6 @@
-# 副本数；生产建议至少 2 个副本
-replicaCount: 2
+# 副本数：必须为 1。approval / replay / 限流都在进程内存里，审计卷为 RWO，
+# 多副本会让两步审批随机 404、防重放失效（见 README「部署」）。
+replicaCount: 1
 
 image:
   # 容器镜像仓库
@@ -56,8 +57,10 @@ ingress:
   enabled: true
   # ingressClassName；Cloudflare Tunnel / Traefik 按集群实际配置
   className: traefik
-  # cert-manager ClusterIssuer
-  clusterIssuer: letsencrypt-prod
+  # cert-manager ClusterIssuer；默认留空 = 不签发证书、不渲染 tls 段（与 k8s/ingress.yaml 一致）。
+  # 集群只有 letsencrypt-prod / staging，无法为 .internal 域名签发；
+  # 启用时 clusterIssuer 与 host 必须成对改成公网域名。
+  clusterIssuer: ""
   # 内部签发 API host
   host: license-signing.aster-lang.internal
 
@@ -72,8 +75,14 @@ networkPolicy:
   vaultNamespace: vault
   # Vault service port
   vaultPort: 8200
-  # JWKS / Slack 外联应通过 egress gateway；原生 NetworkPolicy 不支持 FQDN
-  egressNamespace: cloudflare-tunnel
+  # IdP JWKS / Slack 的公网 443 出站；原生 NetworkPolicy 不支持 FQDN，
+  # 故放行公网并排除私有网段。若有 egress proxy，可收紧 cidr 并把 jwtJwksUrl 指向它。
+  publicEgress:
+    cidr: 0.0.0.0/0
+    except:
+      - 10.0.0.0/8
+      - 172.16.0.0/12
+      - 192.168.0.0/16
 
 serviceMonitor:
   # 是否创建 Prometheus Operator ServiceMonitor
