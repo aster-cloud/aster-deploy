@@ -9,6 +9,7 @@ source "${SCRIPT_DIR}/retry.sh"
 
 API_PORT="${LOCAL_API_PORT:-8080}"
 CLOUD_PORT="${LOCAL_CLOUD_PORT:-3000}"
+LSP_PORT="${LOCAL_LSP_PORT:-3001}"
 PG_PORT="${LOCAL_PG_PORT:-5432}"
 REDIS_PORT="${LOCAL_REDIS_PORT:-6379}"
 ERRORS=0
@@ -127,6 +128,7 @@ else
 fi
 
 check_url "aster-cloud 首页" "http://localhost:${CLOUD_PORT}"
+check_url "aster-lsp 健康检查" "http://localhost:${LSP_PORT}/health"
 
 echo ""
 if [ "$ERRORS" -gt 0 ]; then
