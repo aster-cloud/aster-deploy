@@ -20,8 +20,25 @@ retry() {
       return 1
     fi
     local delay=$(( delay_base * (2 ** (attempt - 1)) ))
-    log_warn "第 ${attempt}/${max_attempts} 次失败，${delay}s 后重试 ..."
+    # ★告警写 stderr：调用方常用 $(retry ...) 捕获命令输出，stdout 不能混入日志（issue #31）
+    log_warn "第 ${attempt}/${max_attempts} 次失败，${delay}s 后重试 ..." >&2
     sleep "$delay"
     attempt=$((attempt + 1))
   done
+}
+
+# 单次探测 HTTP 状态码，写入全局 HTTP_STATUS；连接失败（000）视为失败以触发重试。
+_http_status_once() {
+  HTTP_STATUS="$(curl -s -o /dev/null -w '%{http_code}' "$@" 2>/dev/null || true)"
+  [ -n "$HTTP_STATUS" ] && [ "$HTTP_STATUS" != "000" ]
+}
+
+# 带重试获取 HTTP 状态码。
+# 用法: retry_http_status <max_attempts> <delay_base> <curl 参数...>
+# 结果写入全局 HTTP_STATUS（全部失败时为 000），不经命令替换，不会被日志污染。
+retry_http_status() {
+  local max_attempts="$1" delay_base="$2"
+  shift 2
+  HTTP_STATUS="000"
+  retry "$max_attempts" "$delay_base" _http_status_once "$@" || true
 }

@@ -112,12 +112,13 @@ check_url "aster-api 健康检查" "http://localhost:${API_PORT}/q/health"
 
 # 验证安全控制已禁用：POST 请求无需 HMAC 签名即可到达业务逻辑层
 # 使用 evaluate-source 端点，预期返回 400（参数缺失）而非 401/403（未认证/未授权）
-SECURITY_HTTP_CODE=$(retry 3 2 curl -s -o /dev/null -w "%{http_code}" --max-time 5 \
+retry_http_status 3 2 --max-time 5 \
   -X POST \
   -H "Content-Type: application/json" \
   -H "X-Tenant-Id: test" \
   -d '{"source":"Module Test."}' \
-  "http://localhost:${API_PORT}/api/v1/policies/evaluate-source" 2>/dev/null || echo "000")
+  "http://localhost:${API_PORT}/api/v1/policies/evaluate-source"
+SECURITY_HTTP_CODE="$HTTP_STATUS"
 if [ "$SECURITY_HTTP_CODE" = "401" ] || [ "$SECURITY_HTTP_CODE" = "403" ] || [ "$SECURITY_HTTP_CODE" = "000" ]; then
   log_error "API 安全控制未禁用（HTTP ${SECURITY_HTTP_CODE}）"
   ERRORS=$((ERRORS + 1))
