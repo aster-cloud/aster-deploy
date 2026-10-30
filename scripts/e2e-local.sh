@@ -71,67 +71,8 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-# ─── stage 调度辅助 ─────────────────────────────────────────────────────
-should_run_stage() {
-  local stage="$1"
-  if [ ${#ONLY_STAGES[@]} -gt 0 ]; then
-    local s
-    for s in "${ONLY_STAGES[@]}"; do
-      [ "$s" = "$stage" ] && return 0
-    done
-    return 1
-  fi
-  local s
-  for s in "${SKIP_STAGES[@]}"; do
-    [ "$s" = "$stage" ] && return 1
-  done
-  return 0
-}
-
-# ─── 全局计数 ──────────────────────────────────────────────────────────
-declare -a STAGE_NAMES=()
-declare -a STAGE_STATUS=()  # PASS / FAIL / SKIP
-declare -a STAGE_TIME=()
-
-run_stage() {
-  local stage="$1" name="$2"
-  shift 2
-
-  if ! should_run_stage "$stage"; then
-    STAGE_NAMES+=("$name")
-    STAGE_STATUS+=("SKIP")
-    STAGE_TIME+=("0")
-    log_warn "跳过 stage: $stage"
-    return 0
-  fi
-
-  echo ""
-  log_info "═══ ${name} ═══"
-  local start_ts
-  start_ts=$(date +%s)
-
-  # subshell 隔离 cd / set -e 行为
-  if ( "$@" ); then
-    local end_ts duration
-    end_ts=$(date +%s)
-    duration=$((end_ts - start_ts))
-    STAGE_NAMES+=("$name")
-    STAGE_STATUS+=("PASS")
-    STAGE_TIME+=("$duration")
-    log_success "${name} 通过 (${duration}s)"
-    return 0
-  else
-    local rc=$?
-    local end_ts duration
-    end_ts=$(date +%s)
-    duration=$((end_ts - start_ts))
-    STAGE_NAMES+=("$name")
-    STAGE_STATUS+=("FAIL")
-    STAGE_TIME+=("$duration")
-    log_error "${name} 失败（exit=${rc}, ${duration}s）"
-    return "$rc"
-  fi
-}
+# stage 调度（run_stage）与资源清理登记见 e2e-lib.sh；有离线测试 e2e-lib.test.sh
+source "${SCRIPT_DIR}/e2e-lib.sh"
 
 # ─── 通用工具 ──────────────────────────────────────────────────────────
 ensure_cmd() {
@@ -199,7 +140,8 @@ ensure_dir() {
 }
 
 wait_http() {
-  local url="$1" timeout="${2:-60}" label="${3:-$url}"
+  local url="$1" timeout="${2:-60}"
+  local label="${3:-$url}"
   local i
   for i in $(seq 1 "$timeout"); do
     if curl -fsS --max-time 2 "$url" >/dev/null 2>&1; then
@@ -212,30 +154,10 @@ wait_http() {
   return 1
 }
 
-# 后台进程登记 + 退出清理
-declare -a CLEANUP_PIDS=()
-register_pid() {
-  CLEANUP_PIDS+=("$1")
-}
-
-cleanup() {
-  local pid
-  for pid in "${CLEANUP_PIDS[@]:-}"; do
-    [ -z "$pid" ] && continue
-    if kill -0 "$pid" 2>/dev/null; then
-      log_info "停止 PID ${pid}"
-      kill "$pid" 2>/dev/null || true
-      # 给 15 秒优雅关闭
-      local i
-      for i in $(seq 1 15); do
-        kill -0 "$pid" 2>/dev/null || break
-        sleep 1
-      done
-      kill -9 "$pid" 2>/dev/null || true
-    fi
-  done
-}
-trap cleanup EXIT INT TERM
+# 后台进程 / 容器登记表落在文件里（stage 跑在子 shell，数组改动回不到父 shell）
+init_cleanup_registry
+trap 'cleanup_resources; rm -f "$CLEANUP_FILE"' EXIT
+trap 'exit 130' INT TERM
 
 # 各 stage 的工作目录解析（带缓存）
 declare -A REPO_DIR_CACHE=()
@@ -371,7 +293,8 @@ stage_api_e2e() {
     -p 16379:6379 redis:7-alpine >/dev/null
 
   # 注册清理（trap 会调用）
-  CLEANUP_PIDS+=("CONTAINER:$pg_name" "CONTAINER:$redis_name")
+  register_cleanup "CONTAINER:$pg_name"
+  register_cleanup "CONTAINER:$redis_name"
 
   # 等 Postgres
   local i
@@ -402,7 +325,7 @@ stage_api_e2e() {
   )
   local api_pid
   api_pid=$(cat "${d}/e2e-aster-api.pid")
-  register_pid "$api_pid"
+  register_cleanup "PID:$api_pid"
 
   if ! wait_http "http://localhost:18080/q/health" 90 "aster-api /q/health"; then
     log_error "aster-api 启动失败，日志末 80 行："
@@ -487,24 +410,6 @@ stage_ci_only_notice() {
     log_warn "推送 main 后由 GitHub Actions 自动跑这些。"
   fi
 }
-
-# ═══ 容器清理（运行 stage_api_e2e 时启动的 docker/podman 容器） ═══════════
-cleanup_containers() {
-  [ -z "${CONTAINER_CLI:-}" ] && return 0  # 未用过容器运行时，直接返回
-  local entry
-  for entry in "${CLEANUP_PIDS[@]:-}"; do
-    case "$entry" in
-      CONTAINER:*)
-        local cname="${entry#CONTAINER:}"
-        if "$CONTAINER_CLI" ps --format '{{.Names}}' 2>/dev/null | grep -qx "$cname"; then
-          log_info "停止容器 ${cname}"
-          "$CONTAINER_CLI" stop "$cname" >/dev/null 2>&1 || true
-        fi
-        ;;
-    esac
-  done
-}
-trap 'cleanup_containers; cleanup' EXIT INT TERM
 
 # ═══ 主流程 ════════════════════════════════════════════════════════════
 GLOBAL_START=$(date +%s)
