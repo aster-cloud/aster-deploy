@@ -12,6 +12,7 @@ MODE="${1:-dev}"
 ERRORS=0
 
 check_cmd() {
+  # shellcheck disable=SC2034  # min_version 为历史保留的调用约定（调用方仍传第二个参数）
   local cmd="$1" min_version="${2:-}" label="${3:-$1}"
   if command -v "$cmd" >/dev/null 2>&1; then
     local version

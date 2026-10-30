@@ -91,7 +91,7 @@ if [[ "${1:-}" == "--self-test" ]]; then
   python3 - "$fixture" <<'PY'
 import re, sys
 p = sys.argv[1]; s = open(p, encoding='utf-8').read()
-anchor = '      - task: deploy:lsp'
+anchor = '      - task: deploy:cloud'
 assert s.count(anchor) == 1, f'!! 自检锚点未命中 count={s.count(anchor)}，变异未落地'
 open(p, 'w', encoding='utf-8').write(
     s.replace(anchor, '      - task: deploy:api\n' + anchor, 1))
