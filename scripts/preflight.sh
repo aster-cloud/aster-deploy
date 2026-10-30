@@ -5,6 +5,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/log.sh"
+source "${SCRIPT_DIR}/path.sh"
 source "${SCRIPT_DIR}/resolve-dir.sh"
 
 MODE="${1:-dev}"
@@ -126,6 +127,15 @@ if [ "$MODE" = "release" ]; then
   check_env DOCKERHUB_TOKEN "Docker Hub Token"
   check_env CLOUDFLARE_API_TOKEN "Cloudflare API Token"
   check_env KUBECONFIG "KUBECONFIG"
+  if [ -n "${KUBECONFIG:-}" ]; then
+    kubeconfig_path="$(expand_tilde "$KUBECONFIG")"
+    if [ -f "$kubeconfig_path" ]; then
+      log_success "KUBECONFIG 文件存在（${kubeconfig_path}）"
+    else
+      log_error "KUBECONFIG 指向的文件不存在: ${kubeconfig_path}"
+      ERRORS=$((ERRORS + 1))
+    fi
+  fi
 fi
 
 echo ""

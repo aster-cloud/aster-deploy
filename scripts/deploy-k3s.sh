@@ -9,9 +9,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/log.sh"
+source "${SCRIPT_DIR}/path.sh"
 
 TARGET="$1"
-KUBECONFIG_PATH="${KUBECONFIG:-${HOME}/.kube/k3s-config}"
+KUBECONFIG_PATH="$(expand_tilde "${KUBECONFIG:-${HOME}/.kube/k3s-config}")"
 
 case "$TARGET" in
   api)

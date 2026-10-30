@@ -42,4 +42,14 @@ grep -q "rollout history deployment/aster-lsp" "$CALL_LOG" || fail "失败分支
 grep -q "REVISION" "$TMP/out.log" || fail "输出里没有 revision 历史表"
 grep -q "rollout undo deployment/aster-lsp" "$TMP/out.log" || fail "输出里没有可粘贴的 rollout undo 命令"
 
+# issue #25：KUBECONFIG 写成 ~/xxx（Task dotenv 不展开）时，脚本必须展开后再传给 kubectl
+: > "$CALL_LOG"
+set +e
+# shellcheck disable=SC2088  # 传入字面量 ~ 正是测试目的
+HOME="$TMP" KUBECTL_CALL_LOG="$CALL_LOG" PATH="$TMP/bin:$PATH" KUBECONFIG='~/kubeconfig' \
+  bash "$SCRIPT_DIR/deploy-k3s.sh" lsp > "$TMP/out.log" 2>&1
+set -e
+grep -q -- "--kubeconfig $TMP/kubeconfig " "$CALL_LOG" || fail "KUBECONFIG=~/kubeconfig 未被展开为 \$HOME/kubeconfig"
+! grep -q -- "--kubeconfig ~/" "$CALL_LOG" || fail "kubectl 收到了字面量 ~ 路径"
+
 echo "✓ deploy-k3s.sh 失败分支：列出 revision + 回滚命令，exit=$STATUS"
